@@ -1,0 +1,699 @@
+/* YouTube Music Ambient Background Extension */
+
+/* ============================================
+   AMBIENT BACKGROUND CONTAINER & LAYERS
+   ============================================ */
+
+.ambient-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.ambient-layer {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: blur(50px) saturate(1.6) brightness(0.65);
+  transform: scale(1.5);
+  transition: background-image 0.8s ease-in-out;
+}
+
+/* Static mode: only first layer visible */
+.ambient-container .layer-2,
+.ambient-container .layer-3 {
+  opacity: 0;
+}
+
+/* ============================================
+   ANIMATED MODE - More Prominent Movement
+   ============================================ */
+
+.ambient-container.animated .layer-1 {
+  animation: drift1 12s ease-in-out infinite;
+}
+
+.ambient-container.animated .layer-2 {
+  opacity: 0.7;
+  animation: drift2 15s ease-in-out infinite;
+}
+
+.ambient-container.animated .layer-3 {
+  opacity: 0.5;
+  animation: drift3 18s ease-in-out infinite;
+}
+
+@keyframes drift1 {
+  0%, 100% { transform: scale(1.5) translate(0, 0); }
+  25% { transform: scale(1.6) translate(5%, 3%); }
+  50% { transform: scale(1.7) translate(-3%, 6%); }
+  75% { transform: scale(1.6) translate(-5%, 2%); }
+}
+
+@keyframes drift2 {
+  0%, 100% { transform: scale(1.6) translate(0, 0); }
+  33% { transform: scale(1.75) translate(-6%, 4%); }
+  66% { transform: scale(1.65) translate(5%, -3%); }
+}
+
+@keyframes drift3 {
+  0%, 100% { transform: scale(1.7) translate(0, 0); }
+  50% { transform: scale(1.85) translate(6%, -5%); }
+}
+
+/* ============================================
+   SCOPED TRANSPARENT BACKGROUNDS
+   Only apply when ambient is active (on /watch pages)
+   ============================================ */
+
+body.ambient-active ytmusic-app,
+body.ambient-active ytmusic-browse-response,
+body.ambient-active ytmusic-player-page,
+body.ambient-active #content,
+body.ambient-active #contents,
+body.ambient-active ytmusic-tabbed-search-results-renderer {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+body.ambient-active {
+  background: transparent !important;
+}
+
+body.ambient-active ytmusic-app-layout {
+  background: transparent !important;
+}
+
+body.ambient-active ytmusic-app-layout > [slot="player-bar-background"] {
+  background: rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Remove YouTube Music's native gradient/blur backgrounds */
+body.ambient-active ytmusic-player-page::before,
+body.ambient-active ytmusic-player-page::after,
+body.ambient-active #player-page::before,
+body.ambient-active #player-page::after {
+  display: none !important;
+  opacity: 0 !important;
+}
+
+
+body.ambient-active ytmusic-player-page .gradient,
+body.ambient-active ytmusic-player-page .gradient-scrim,
+body.ambient-active ytmusic-player-page .scrim {
+  display: none !important;
+  background: transparent !important;
+}
+
+body.ambient-active ytmusic-search-page {
+  background: transparent !important;
+}
+
+body.ambient-active ytmusic-player-page {
+  background: transparent !important;
+}
+
+body.ambient-active ytmusic-two-row-item-renderer,
+body.ambient-active ytmusic-responsive-list-item-renderer {
+  background: transparent !important;
+}
+
+body.ambient-active ytmusic-carousel-shelf-renderer,
+body.ambient-active ytmusic-shelf-renderer {
+  background: transparent !important;
+}
+
+/* ============================================
+   RIGHT SIDE PANEL - Queue/Lyrics Area
+   Target specific background containers only
+   ============================================ */
+
+body.ambient-active ytmusic-tab-renderer,
+body.ambient-active #tab-renderer,
+body.ambient-active #automix-contents,
+body.ambient-active ytmusic-player-queue #contents,
+body.ambient-active tp-yt-paper-tabs,
+body.ambient-active #tabs.ytmusic-player-page,
+body.ambient-active ytmusic-player-queue,
+body.ambient-active #side-panel,
+body.ambient-active #player-page,
+body.ambient-active ytmusic-player-page #player-page,
+body.ambient-active [slot="player-page"],
+body.ambient-active #layout,
+body.ambient-active #right-content {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* ============================================
+   ALWAYS-ON UI ELEMENT BACKGROUNDS
+   These need backgrounds for readability
+   ============================================ */
+
+ytmusic-player-bar {
+  background: rgba(0, 0, 0, 0.4) !important;
+  backdrop-filter: blur(10px);
+}
+
+ytmusic-nav-bar {
+  background: rgba(0, 0, 0, 0.4) !important;
+  backdrop-filter: blur(10px);
+}
+
+ytmusic-header-renderer {
+  background: rgba(0, 0, 0, 0.3) !important;
+}
+
+ytmusic-guide-renderer {
+  background: rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Queue panel - fully transparent */
+ytmusic-player-queue {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* ============================================
+   KEEP FILTER PILL BUTTONS DEFAULT STYLE
+   Don't override their appearance
+   ============================================ */
+
+body.ambient-active ytmusic-chip-cloud-chip-renderer,
+body.ambient-active tp-yt-paper-chip,
+body.ambient-active yt-chip-cloud-chip-renderer,
+body.ambient-active ytmusic-chip-cloud-renderer {
+  /* Keep default YouTube Music styling */
+}
+
+/* ============================================
+   LAYOUT ADJUSTMENTS
+   Move album art up, shift Song/Video toggle
+   Use percentages for responsive sizing
+   ============================================ */
+
+/* Make parent containers transparent to prevent gray box when shifting */
+body.ambient-active #layout,
+body.ambient-active #player-page,
+body.ambient-active ytmusic-player-page-background,
+body.ambient-active .player-page,
+body.ambient-active [page-type="MUSIC_PAGE_TYPE_TRACK"],
+body.ambient-active ytmusic-app-layout #layout {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+
+/* Main panel transparency */
+body.ambient-active ytmusic-player-page #main-panel {
+  background: transparent !important;
+}
+
+/* Remove gray box behind album art and around player page */
+body.ambient-active ytmusic-player-page #song-image-wrapper,
+body.ambient-active ytmusic-player-page .song-image-wrapper,
+body.ambient-active ytmusic-player-page #thumbnail-overlay,
+body.ambient-active ytmusic-player-page .thumbnail-overlay,
+body.ambient-active ytmusic-player-page #main-panel-background,
+body.ambient-active ytmusic-player-page .image-cropper,
+body.ambient-active ytmusic-player-page ytmusic-fullbleed-thumbnail-renderer,
+body.ambient-active ytmusic-player-page #background,
+body.ambient-active ytmusic-player-page .background,
+body.ambient-active ytmusic-player-page #gradient,
+body.ambient-active ytmusic-player-page .gradient-background,
+body.ambient-active ytmusic-player-page ytmusic-player-page-background,
+body.ambient-active #content-wrapper,
+body.ambient-active .content-wrapper,
+body.ambient-active ytmusic-player-page #left-content,
+body.ambient-active ytmusic-player-page .left-content,
+body.ambient-active ytmusic-player-page #main-content,
+body.ambient-active ytmusic-player-page .main-content {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* ============================================
+   SCROLLBAR - Hide by default, show on hover
+   ============================================ */
+
+/* Hide scrollbar by default using multiple methods */
+body.ambient-active ytmusic-player-queue,
+body.ambient-active ytmusic-player-queue #contents,
+body.ambient-active ytmusic-player-queue .scroller,
+body.ambient-active #side-panel,
+body.ambient-active #side-panel *,
+body.ambient-active ytmusic-tab-renderer,
+body.ambient-active #tab-renderer,
+body.ambient-active #automix-contents,
+body.ambient-active .queue-items {
+  scrollbar-width: none !important; /* Firefox */
+  -ms-overflow-style: none !important; /* IE/Edge */
+}
+
+body.ambient-active ytmusic-player-queue::-webkit-scrollbar,
+body.ambient-active ytmusic-player-queue #contents::-webkit-scrollbar,
+body.ambient-active ytmusic-player-queue .scroller::-webkit-scrollbar,
+body.ambient-active #side-panel::-webkit-scrollbar,
+body.ambient-active #side-panel *::-webkit-scrollbar,
+body.ambient-active ytmusic-tab-renderer::-webkit-scrollbar,
+body.ambient-active #tab-renderer::-webkit-scrollbar,
+body.ambient-active #automix-contents::-webkit-scrollbar,
+body.ambient-active .queue-items::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+}
+
+/* Show scrollbar on hover */
+body.ambient-active ytmusic-player-queue:hover,
+body.ambient-active ytmusic-player-queue:hover #contents,
+body.ambient-active ytmusic-player-queue:hover .scroller,
+body.ambient-active #side-panel:hover {
+  scrollbar-width: thin !important;
+}
+
+body.ambient-active ytmusic-player-queue:hover::-webkit-scrollbar,
+body.ambient-active ytmusic-player-queue:hover #contents::-webkit-scrollbar,
+body.ambient-active #side-panel:hover::-webkit-scrollbar {
+  display: block !important;
+  width: 6px !important;
+}
+
+body.ambient-active ytmusic-player-queue:hover::-webkit-scrollbar-thumb,
+body.ambient-active #side-panel:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3) !important;
+  border-radius: 3px !important;
+}
+
+body.ambient-active ytmusic-player-queue:hover::-webkit-scrollbar-track,
+body.ambient-active #side-panel:hover::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+/* ============================================
+   LAYOUT OPTIONS - Shift Up
+   ============================================ */
+
+body.ambient-active.layout-shift-up ytmusic-player-page #main-panel {
+  margin-top: -3vh !important;
+}
+
+/* ============================================
+   SYNCED LYRICS
+   ============================================ */
+
+#ytm-ext-synced-lyrics {
+  display: block !important;
+  width: 100% !important;
+  max-height: 800px !important;
+  overflow-y: auto !important;
+  padding: 16px !important;
+  box-sizing: border-box !important;
+  font-size: 28px !important;
+  line-height: 2.2 !important;
+  color: #fff !important;
+  scroll-behavior: smooth !important;
+}
+
+/* Apple Music style - non-current lines: blurred, faded, slightly smaller */
+.synced-line {
+  padding: 12px 0 !important;
+  cursor: pointer !important;
+  transition: all 0.4s ease-in-out !important;
+  filter: blur(2px) !important;
+  opacity: 0.35 !important;
+  transform: scale(0.95) !important;
+  transform-origin: left center !important;
+  display: block !important;
+}
+
+.synced-line:hover {
+  opacity: 0.6 !important;
+  filter: blur(1px) !important;
+}
+
+/* Apple Music style - current line: clear, full size, subtle glow */
+.synced-line.current {
+  filter: blur(0) !important;
+  opacity: 1 !important;
+  transform: scale(1) !important;
+  font-weight: 600 !important;
+  color: #fff !important;
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.3) !important;
+}
+
+/* ============================================
+   FULLSCREEN MODE - Album Art (left 50%)
+   Lyrics are repositioned via CSS, not copied
+   ============================================ */
+
+#ytm-ext-fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: calc(100vh - 80px);
+  z-index: 9998;
+  display: flex;
+  background: transparent;
+  pointer-events: auto;
+}
+
+.fs-layout {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
+.fs-album {
+  width: 50%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5%;
+  box-sizing: border-box;
+}
+
+.fs-lyrics {
+  width: 50%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7.5% 5%;
+  box-sizing: border-box;
+}
+
+.fs-album img {
+  max-width: 80%;
+  max-height: 80%;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+/* Fullscreen: lyrics inside the new container */
+body.fullscreen-active #ytm-ext-synced-lyrics {
+  width: 100% !important;
+  height: auto !important;
+  max-height: calc(2.2em * 6) !important;
+  padding: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  background: transparent !important;
+  opacity: 1 !important;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+/* Hide scrollbar by default in fullscreen */
+body.fullscreen-active #ytm-ext-synced-lyrics::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* Show scrollbar on hover in fullscreen */
+body.fullscreen-active #ytm-ext-synced-lyrics:hover {
+  scrollbar-width: thin !important;
+}
+
+body.fullscreen-active #ytm-ext-synced-lyrics:hover::-webkit-scrollbar {
+  display: block !important;
+  width: 6px !important;
+}
+
+body.fullscreen-active #ytm-ext-synced-lyrics:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3) !important;
+  border-radius: 3px !important;
+}
+
+
+/* Keep YouTube's controls visible in fullscreen */
+:fullscreen ytmusic-player-bar,
+ytmusic-app:fullscreen ytmusic-player-bar {
+  z-index: 9999 !important;
+}
+
+/* Ensure ambient background stays visible in fullscreen */
+.ambient-container {
+  z-index: 0 !important;
+}
+
+#ytm-ext-fullscreen {
+  z-index: 9998 !important;
+}
+
+/* =============================================
+   UNIFIED ALBUM ART - Round 2 CSS
+   ============================================= */
+
+/* ----------------------------------------
+    1. HIDE YOUTUBE'S NATIVE ALBUM ART
+    (Only main content, NOT player bar thumbnail)
+    ---------------------------------------- */
+body.ytm-ext-active #song-image {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Make content area transparent so unified art shows through */
+body.ytm-ext-active ytmusic-player {
+  background: transparent !important;
+}
+body.ytm-ext-active #main-panel {
+  background: transparent !important;
+}
+body.ytm-ext-active #song-media-window {
+  background: transparent !important;
+}
+
+/* Show video when in video mode */
+body.ytm-ext-active.video-mode #song-image {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+/* ----------------------------------------
+    2. UNIFIED ALBUM ART CONTAINER
+    ---------------------------------------- */
+#ytm-ext-unified-art {
+  position: fixed;
+  top: 8vh;
+  left: 0;
+  right: 400px;
+  height: calc(100vh - 80px - 8vh);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-left: 5vw;
+  z-index: 100;
+  pointer-events: none;
+  background: transparent !important;
+}
+
+/* Album art image - FIXED SIZE using viewport units */
+#ytm-ext-unified-art img {
+  max-width: min(500px, 40vw);
+  max-height: min(500px, 60vh);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+  transition: opacity 0.3s ease;
+}
+
+/* Crossfade animation */
+#ytm-ext-unified-art img.fading-out {
+  opacity: 0;
+}
+
+/* Hide when no art or video mode */
+#ytm-ext-unified-art.hidden {
+  display: none;
+}
+
+/* ----------------------------------------
+    3. SIDEBAR COLLAPSED STATE
+    ---------------------------------------- */
+body.sidebar-collapsed #ytm-ext-unified-art {
+  right: 50px;
+  justify-content: center;
+  padding-left: 0;
+}
+
+body.sidebar-collapsed ytmusic-player-queue,
+body.sidebar-collapsed #side-panel,
+body.sidebar-collapsed ytmusic-tab-renderer {
+  width: 0 !important;
+  min-width: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* ----------------------------------------
+    4. SIDEBAR TOGGLE BUTTON (Apple-style)
+    ---------------------------------------- */
+#ytm-ext-sidebar-toggle {
+  position: fixed;
+  top: 80px;
+  right: 412px;
+  width: 28px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  cursor: pointer;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  opacity: 0.6;
+}
+
+#ytm-ext-sidebar-toggle:hover {
+  background: rgba(255, 255, 255, 0.15);
+  opacity: 1;
+}
+
+#ytm-ext-sidebar-toggle::before {
+  content: '';
+  width: 14px;
+  height: 10px;
+  border: 1.5px solid white;
+  border-radius: 2px;
+}
+
+#ytm-ext-sidebar-toggle::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  width: 4px;
+  height: 6px;
+  background: white;
+  border-radius: 1px;
+}
+
+body.sidebar-collapsed #ytm-ext-sidebar-toggle {
+  right: 12px;
+}
+
+body.sidebar-collapsed #ytm-ext-sidebar-toggle::after {
+  right: auto;
+  left: 4px;
+}
+
+/* Hide sidebar toggle in fullscreen */
+body.fullscreen-active #ytm-ext-sidebar-toggle {
+  display: none !important;
+}
+
+/* Move Song/Video tabs left when sidebar expanded */
+body.ytm-ext-active ytmusic-player-page .tab-header {
+  transform: translateX(-5vw);
+}
+
+body.ytm-ext-active.sidebar-collapsed ytmusic-player-page .tab-header {
+  transform: none;
+}
+
+/* ----------------------------------------
+    5. FULLSCREEN MODE
+    ---------------------------------------- */
+body.fullscreen-active #ytm-ext-unified-art {
+  z-index: 9999;
+  right: 50%;
+}
+
+body.fullscreen-active.fullscreen-lyrics-hidden #ytm-ext-unified-art {
+  right: 50px;
+}
+
+/* Hide the duplicate album art in fullscreen's .fs-album container */
+/* The unified art shows through instead */
+body.ytm-ext-active .fs-album img {
+  display: none !important;
+}
+
+/* Hide fullscreen preview/miniplayer window */
+body.fullscreen-active ytmusic-miniplayer,
+body.fullscreen-active #movie_player .ytp-miniplayer-ui {
+  display: none !important;
+}
+
+/* ----------------------------------------
+    6. LYRICS TOGGLE BUTTON (Apple-style chevron)
+    ---------------------------------------- */
+#ytm-ext-lyrics-toggle {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  width: 32px;
+  height: 32px;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  cursor: pointer;
+  z-index: 10000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  opacity: 0.7;
+}
+
+body.fullscreen-active #ytm-ext-lyrics-toggle {
+  display: flex;
+}
+
+#ytm-ext-lyrics-toggle:hover {
+  background: rgba(0, 0, 0, 0.5);
+  opacity: 1;
+}
+
+/* Chevron icon using CSS */
+#ytm-ext-lyrics-toggle::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid white;
+  border-bottom: 2px solid white;
+  transform: rotate(-45deg);
+  margin-left: 3px;
+}
+
+body.fullscreen-lyrics-hidden #ytm-ext-lyrics-toggle::after {
+  transform: rotate(135deg);
+  margin-left: -3px;
+}
+
+/* ----------------------------------------
+    7. FULLSCREEN LYRICS HIDDEN STATE
+    ---------------------------------------- */
+body.fullscreen-lyrics-hidden .fs-lyrics {
+  width: 0 !important;
+  opacity: 0 !important;
+  padding: 0 !important;
+  overflow: hidden;
+  transition: width 0.3s ease, opacity 0.2s ease;
+}
+
+body.fullscreen-lyrics-hidden .fs-album {
+  width: 100% !important;
+  transition: width 0.3s ease;
+}
+

@@ -1,0 +1,212 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 280px;
+  background: #0f0f0f;
+  color: #ffffff;
+  font-family: 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
+  padding: 16px;
+}
+
+.header {
+  margin-bottom: 16px;
+}
+
+.header h1 {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* ============================================
+   SETTINGS SECTION
+   ============================================ */
+
+.settings-section {
+  margin-bottom: 12px;
+}
+
+.setting-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.setting-label {
+  font-size: 13px;
+  color: #ffffff;
+}
+
+/* Toggle Switch */
+.toggle {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+}
+
+.toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #3d3d3d;
+  transition: 0.2s;
+  border-radius: 22px;
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background-color: #ffffff;
+  transition: 0.2s;
+  border-radius: 50%;
+}
+
+.toggle input:checked + .toggle-slider {
+  background-color: #ff0000;
+}
+
+.toggle input:checked + .toggle-slider:before {
+  transform: translateX(18px);
+}
+
+.divider {
+  height: 1px;
+  background: #3d3d3d;
+  margin: 12px 0;
+}
+
+/* ============================================
+   SLEEP TIMER SECTION
+   ============================================ */
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #aaaaaa;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-badge {
+  background: #1d1d1d;
+  border: 1px solid #ff0000;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #ff0000;
+  text-transform: none;
+}
+
+.countdown-section {
+  text-align: center;
+  padding: 16px 0;
+  border-bottom: 1px solid #3d3d3d;
+  margin-bottom: 16px;
+}
+
+.countdown-label {
+  font-size: 12px;
+  color: #aaaaaa;
+  margin-bottom: 8px;
+}
+
+.countdown {
+  font-size: 32px;
+  font-weight: 600;
+  font-family: 'Roboto Mono', monospace;
+  letter-spacing: 2px;
+}
+
+.time-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.time-btn {
+  flex: 1;
+  min-width: 40px;
+  background: #1d1d1d;
+  border: 1px solid #3d3d3d;
+  border-radius: 4px;
+  color: #ffffff;
+  padding: 10px 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.time-btn:hover {
+  background: #2d2d2d;
+}
+
+.time-btn:active {
+  background: #3d3d3d;
+}
+
+.time-btn.selected {
+  background: #3d3d3d;
+  border-color: #ffffff;
+}
+
+.time-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cancel-section {
+  margin-top: 16px;
+}
+
+.cancel-btn {
+  width: 100%;
+  background: transparent;
+  border: 1px solid #3d3d3d;
+  border-radius: 4px;
+  color: #aaaaaa;
+  padding: 10px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.cancel-btn:hover {
+  background: #1d1d1d;
+  color: #ffffff;
+}
+
+.error-section {
+  padding: 16px 0;
+  text-align: center;
+}
+
+.error-text {
+  font-size: 12px;
+  color: #aaaaaa;
+}
+
+.hidden {
+  display: none;
+}
