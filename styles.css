@@ -118,6 +118,8 @@ body.ambient-active ytmusic-search-page {
 
 body.ambient-active ytmusic-player-page {
   background: transparent !important;
+  will-change: auto !important;
+  transform: none !important;
 }
 
 body.ambient-active ytmusic-two-row-item-renderer,
@@ -313,14 +315,14 @@ body.ambient-active.layout-shift-up ytmusic-player-page #main-panel {
 #ytm-ext-synced-lyrics {
   display: block !important;
   width: 100% !important;
-  max-height: 800px !important;
+  max-height: 65vh !important;
   overflow-y: auto !important;
   padding: 16px !important;
   box-sizing: border-box !important;
   font-size: 28px !important;
   line-height: 2.2 !important;
   color: #fff !important;
-  scroll-behavior: smooth !important;
+  scroll-behavior: auto !important;
 }
 
 /* Apple Music style - non-current lines: blurred, faded, slightly smaller */
@@ -477,6 +479,44 @@ body.ytm-ext-active #song-media-window {
   background: transparent !important;
 }
 
+/* Player buttons - top-right of album art (inside our container) */
+body.ytm-ext-active .top-row-buttons {
+  position: absolute !important;
+  top: 10px !important;
+  right: 10px !important;
+  left: auto !important;
+  z-index: 10 !important;
+  pointer-events: auto !important;
+}
+
+/* Force white icons on player buttons */
+body.ytm-ext-active .top-row-buttons tp-yt-paper-icon-button,
+body.ytm-ext-active .top-row-buttons button,
+body.ytm-ext-active .top-row-buttons svg,
+body.ytm-ext-active .top-row-buttons iron-icon,
+body.ytm-ext-active .top-row-buttons yt-icon {
+  color: white !important;
+  fill: white !important;
+  --iron-icon-fill-color: white !important;
+  --yt-icon-color: white !important;
+}
+
+/* Hide unwanted player buttons (only show miniplayer and fullscreen) */
+body.ytm-ext-active .top-row-buttons .player-maximize-button,
+body.ytm-ext-active .top-row-buttons .player-close-button {
+  display: none !important;
+}
+
+/* Hide player buttons in fullscreen (only sidebar toggle visible) */
+body.fullscreen-active .top-row-buttons {
+  display: none !important;
+}
+
+/* Hide Song/Video toggle in fullscreen */
+body.fullscreen-active #av-id {
+  display: none !important;
+}
+
 /* Show video when in video mode */
 body.ytm-ext-active.video-mode #song-image {
   opacity: 1 !important;
@@ -489,13 +529,12 @@ body.ytm-ext-active.video-mode #song-image {
 #ytm-ext-unified-art {
   position: fixed;
   top: 8vh;
-  left: 0;
-  right: 400px;
+  left: 1%;
+  right: 30%;
   height: calc(100vh - 80px - 8vh);
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  padding-left: 5vw;
+  justify-content: center;
   z-index: 100;
   pointer-events: none;
   background: transparent !important;
@@ -519,18 +558,62 @@ body.ytm-ext-active.video-mode #song-image {
   opacity: 0;
 }
 
+/* Slide-up entrance animation (non-/watch → /watch navigation) */
+@keyframes ytm-ext-slide-up {
+  from { transform: translateY(100vh); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+#ytm-ext-unified-art.slide-in,
+#ytm-ext-sidebar-toggle.slide-in,
+.ambient-container.slide-in {
+  animation: ytm-ext-slide-up 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+body.ytm-ext-active #av-id.slide-in {
+  animation: ytm-ext-slide-up 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Dark gradient behind top buttons on hover */
+#ytm-ext-art-wrapper::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 80px;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 5;
+  border-radius: 8px 8px 0 0;
+  pointer-events: none;
+}
+
+#ytm-ext-art-wrapper:hover::before {
+  opacity: 1;
+}
+
+body.fullscreen-active #ytm-ext-art-wrapper::before {
+  display: none;
+}
+
 /* Hide when no art or video mode */
 #ytm-ext-unified-art.hidden {
   display: none;
+}
+
+/* Hide extension UI when not on /watch page */
+body:not(.ambient-active) #ytm-ext-unified-art,
+body:not(.ambient-active) #ytm-ext-sidebar-toggle {
+  display: none !important;
 }
 
 /* ----------------------------------------
     3. SIDEBAR COLLAPSED STATE
     ---------------------------------------- */
 body.sidebar-collapsed #ytm-ext-unified-art {
-  right: 50px;
-  justify-content: center;
-  padding-left: 0;
+  right: 5%;
 }
 
 body.sidebar-collapsed ytmusic-player-queue,
@@ -547,8 +630,8 @@ body.sidebar-collapsed ytmusic-tab-renderer {
     ---------------------------------------- */
 #ytm-ext-sidebar-toggle {
   position: fixed;
-  top: 80px;
-  right: 412px;
+  top: 10%;
+  right: 2%;
   width: 28px;
   height: 28px;
   background: rgba(255, 255, 255, 0.08);
@@ -571,8 +654,8 @@ body.sidebar-collapsed ytmusic-tab-renderer {
 
 #ytm-ext-sidebar-toggle::before {
   content: '';
-  width: 14px;
-  height: 10px;
+  width: 16px;
+  height: 12px;
   border: 1.5px solid white;
   border-radius: 2px;
 }
@@ -580,34 +663,38 @@ body.sidebar-collapsed ytmusic-tab-renderer {
 #ytm-ext-sidebar-toggle::after {
   content: '';
   position: absolute;
-  right: 4px;
-  width: 4px;
-  height: 6px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 1.5px;
+  height: 8px;
   background: white;
-  border-radius: 1px;
 }
 
 body.sidebar-collapsed #ytm-ext-sidebar-toggle {
-  right: 12px;
+  right: 2%;
 }
 
-body.sidebar-collapsed #ytm-ext-sidebar-toggle::after {
-  right: auto;
-  left: 4px;
-}
-
-/* Hide sidebar toggle in fullscreen */
+/* Ensure sidebar toggle is above fullscreen container */
 body.fullscreen-active #ytm-ext-sidebar-toggle {
-  display: none !important;
+  z-index: 10000 !important;
 }
 
-/* Move Song/Video tabs left when sidebar expanded */
-body.ytm-ext-active ytmusic-player-page .tab-header {
-  transform: translateX(-5vw);
+/* Icon stays same in collapsed state */
+
+/* Center Song/Video toggle above album art */
+body.ytm-ext-active #av-id {
+  position: fixed !important;
+  top: 10vh !important;
+  left: 1% !important;
+  right: 30% !important;
+  display: flex !important;
+  justify-content: center !important;
+  z-index: 101 !important;
 }
 
-body.ytm-ext-active.sidebar-collapsed ytmusic-player-page .tab-header {
-  transform: none;
+body.ytm-ext-active.sidebar-collapsed #av-id {
+  right: 5% !important;
 }
 
 /* ----------------------------------------
@@ -615,11 +702,12 @@ body.ytm-ext-active.sidebar-collapsed ytmusic-player-page .tab-header {
     ---------------------------------------- */
 body.fullscreen-active #ytm-ext-unified-art {
   z-index: 9999;
+  left: 5%;
   right: 50%;
 }
 
-body.fullscreen-active.fullscreen-lyrics-hidden #ytm-ext-unified-art {
-  right: 50px;
+body.fullscreen-active.sidebar-collapsed #ytm-ext-unified-art {
+  right: 5%;
 }
 
 /* Hide the duplicate album art in fullscreen's .fs-album container */
@@ -635,65 +723,16 @@ body.fullscreen-active #movie_player .ytp-miniplayer-ui {
 }
 
 /* ----------------------------------------
-    6. LYRICS TOGGLE BUTTON (Apple-style chevron)
+    6. FULLSCREEN SIDEBAR COLLAPSED STATE
     ---------------------------------------- */
-#ytm-ext-lyrics-toggle {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  width: 32px;
-  height: 32px;
-  background: rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  cursor: pointer;
-  z-index: 10000;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  opacity: 0.7;
-}
-
-body.fullscreen-active #ytm-ext-lyrics-toggle {
-  display: flex;
-}
-
-#ytm-ext-lyrics-toggle:hover {
-  background: rgba(0, 0, 0, 0.5);
-  opacity: 1;
-}
-
-/* Chevron icon using CSS */
-#ytm-ext-lyrics-toggle::after {
-  content: '';
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid white;
-  border-bottom: 2px solid white;
-  transform: rotate(-45deg);
-  margin-left: 3px;
-}
-
-body.fullscreen-lyrics-hidden #ytm-ext-lyrics-toggle::after {
-  transform: rotate(135deg);
-  margin-left: -3px;
-}
-
-/* ----------------------------------------
-    7. FULLSCREEN LYRICS HIDDEN STATE
-    ---------------------------------------- */
-body.fullscreen-lyrics-hidden .fs-lyrics {
+body.sidebar-collapsed.fullscreen-active .fs-lyrics {
   width: 0 !important;
   opacity: 0 !important;
   padding: 0 !important;
   overflow: hidden;
-  transition: width 0.3s ease, opacity 0.2s ease;
 }
 
-body.fullscreen-lyrics-hidden .fs-album {
+body.sidebar-collapsed.fullscreen-active .fs-album {
   width: 100% !important;
-  transition: width 0.3s ease;
 }
 

@@ -35,6 +35,7 @@ async function fetchLyrics(title, artist, duration) {
     const url = `https://lrclib.net/api/search?track_name=${encodeURIComponent(title)}&artist_name=${encodeURIComponent(artist)}`;
     const response = await fetch(url);
     const results = await response.json();
+    if (!Array.isArray(results)) return null;
 
     // Filter to results that have synced lyrics
     const synced = results.filter(r => r.syncedLyrics);

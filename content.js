@@ -73,6 +73,7 @@
   function updatePageState() {
     const shouldShowAmbient = settings.ambientEnabled && isNowPlayingPage();
     document.body.classList.toggle('ambient-active', shouldShowAmbient);
+    document.body.classList.toggle('ytm-ext-active', shouldShowAmbient);
 
     if (ambientContainer) {
       ambientContainer.style.display = shouldShowAmbient ? 'block' : 'none';
@@ -157,22 +158,55 @@
     });
   }
 
+  // Slide-in animation for non-/watch → /watch navigation
+  function applySlideInAnimation() {
+    const elements = [
+      document.getElementById('ytm-ext-unified-art'),
+      document.getElementById('ytm-ext-sidebar-toggle'),
+      document.querySelector('#av-id'),
+      ambientContainer
+    ];
+    elements.forEach(el => {
+      if (el) {
+        el.classList.add('slide-in');
+        el.addEventListener('animationend', () => {
+          el.classList.remove('slide-in');
+        }, { once: true });
+      }
+    });
+  }
+
   // Listen for URL changes (YouTube Music is SPA)
+  let urlObserver = null;
   function initUrlObserver() {
+    if (urlObserver) return;
     let lastUrl = location.href;
 
-    const urlObserver = new MutationObserver(() => {
+    function onUrlChange() {
       if (location.href !== lastUrl) {
+        const wasWatch = wasOnWatchPage;
         lastUrl = location.href;
+        wasOnWatchPage = isNowPlayingPage();
         updatePageState();
         checkAndUpdate();
         // Recreate elements if missing after navigation
-        createUnifiedAlbumArt();
-        createSidebarToggle();
-        updateUnifiedAlbumArt();
+        if (isNowPlayingPage()) {
+          createUnifiedAlbumArt();
+          createSidebarToggle();
+          updateUnifiedAlbumArt();
+          // Slide-in only when entering /watch from non-/watch
+          if (!wasWatch) {
+            requestAnimationFrame(() => applySlideInAnimation());
+          }
+        }
       }
-    });
+    }
 
+    // Listen for history API changes from player-bridge.js (page context)
+    document.addEventListener('ytm-ext-url-change', onUrlChange);
+
+    // Keep MutationObserver as fallback
+    urlObserver = new MutationObserver(onUrlChange);
     urlObserver.observe(document.body, { childList: true, subtree: true });
   }
 
@@ -299,7 +333,6 @@
           body {
             width: 200px;
             height: 200px;
-            background-image: url('${artUrl}');
             background-size: cover;
             background-position: center;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -412,6 +445,11 @@
         </div>
       `;
 
+      // Set background image via DOM API to avoid XSS from URL interpolation
+      if (artUrl) {
+        pipWindow.document.body.style.backgroundImage = `url("${artUrl}")`;
+      }
+
       pipWindow.document.getElementById('ytm-ext-pip-close-btn').onclick = () => pipWindow.close();
       pipWindow.document.getElementById('ytm-ext-pip-prev').onclick = () => {
         const prevBtn = document.querySelector('ytmusic-player-bar .previous-button button');
@@ -443,7 +481,10 @@
   }
 
   function syncMiniPlayerState() {
-    if (!pipWindow) return;
+    if (!pipWindow || pipWindow.closed) {
+      pipWindow = null;
+      return;
+    }
 
     const video = document.querySelector('video');
     const isPlaying = video && !video.paused;
@@ -508,7 +549,10 @@
     }, 100);
   }
 
+  let keyboardShortcutsInitialized = false;
   function initKeyboardShortcuts() {
+    if (keyboardShortcutsInitialized) return;
+    keyboardShortcutsInitialized = true;
     document.addEventListener('keydown', (e) => {
       // Don't trigger when typing in input fields
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
@@ -527,10 +571,10 @@
         toggleSidebar();
       }
 
-      // ']' key for fullscreen lyrics toggle (only in fullscreen)
+      // ']' key for sidebar toggle in fullscreen
       if (e.key === ']' && document.body.classList.contains('fullscreen-active')) {
         e.preventDefault();
-        toggleFullscreenLyrics();
+        toggleSidebar();
       }
     });
   }
@@ -556,6 +600,10 @@
   // ============================================
   let currentSongHasLyrics = false;
   let lyricsState = 'none'; // 'synced', 'plain', 'none'
+  let lyricsClickHandler = null;
+  let isCrossfading = false;
+  let wasOnWatchPage = false;
+  let visibilityScrollInterval = null;
 
   // ============================================
   // LOGGING & DEBUG INFRASTRUCTURE
@@ -650,16 +698,11 @@
       'ytm-ext-active': document.body.classList.contains('ytm-ext-active'),
       'sidebar-collapsed': document.body.classList.contains('sidebar-collapsed'),
       'fullscreen-active': document.body.classList.contains('fullscreen-active'),
-      'fullscreen-lyrics-hidden': document.body.classList.contains('fullscreen-lyrics-hidden'),
       'video-mode': document.body.classList.contains('video-mode')
     });
 
     const sidebarBtn = document.getElementById('ytm-ext-sidebar-toggle');
     console.log('Sidebar toggle exists:', !!sidebarBtn);
-
-    const lyricsBtn = document.getElementById('ytm-ext-lyrics-toggle');
-    console.log('Lyrics toggle exists:', !!lyricsBtn);
-    console.log('Lyrics toggle visible:', lyricsBtn?.style.display !== 'none');
 
     const songImage = document.querySelector('#song-image');
     if (songImage) {
@@ -770,8 +813,11 @@
     console.log('[YTM-Ext] Container rect:', rect.width, 'x', rect.height, 'at', rect.x, rect.y);
     console.log('[YTM-Ext] Parent:', syncedContainer.parentElement?.tagName);
 
-    // Add click-to-seek
-    syncedContainer.addEventListener('click', (e) => {
+    // Add click-to-seek (remove old handler to prevent accumulation)
+    if (lyricsClickHandler) {
+      syncedContainer.removeEventListener('click', lyricsClickHandler);
+    }
+    lyricsClickHandler = function(e) {
       if (e.target.classList.contains('synced-line')) {
         e.preventDefault();
         e.stopPropagation();
@@ -783,7 +829,8 @@
         seekPlayer(lyricTime);
         console.log('[YTM-Ext] Seeking to time:', lyricTime);
       }
-    });
+    };
+    syncedContainer.addEventListener('click', lyricsClickHandler);
 
     // If in fullscreen, move lyrics to fullscreen container
     if (isFullscreen) {
@@ -848,9 +895,9 @@
       }
 
       if (index !== currentIndex) {
+        const prevIndex = currentIndex;
         currentIndex = index;
         lyricsCurrentIndex = index;
-        console.log('[YTM-Ext] Line changed to index:', index);
 
         const container = document.getElementById('ytm-ext-synced-lyrics');
         if (container) {
@@ -869,7 +916,9 @@
           if (index >= 0 && !isTransitioningFullscreen) {
             const currentEl = container.querySelector('.synced-line.current');
             if (currentEl) {
-              currentEl.scrollIntoView({ behavior: 'auto', block: 'center' });
+              // Small jump (1-2 lines) → smooth. Large jump (tab switch, seek) → instant.
+              const delta = prevIndex !== null ? Math.abs(index - prevIndex) : 999;
+              currentEl.scrollIntoView({ behavior: delta <= 2 ? 'smooth' : 'instant', block: 'center' });
             }
           }
         }
@@ -936,7 +985,6 @@
           element.dataset.synced = 'true';
           lyricsState = 'synced';
           currentSongHasLyrics = true;
-          updateLyricsToggleVisibility();
           console.log('[YTM-Ext] Sync started successfully, lyricsState: synced');
           return;
         }
@@ -960,7 +1008,6 @@
       currentSongHasLyrics = false;
       console.log('[YTM-Ext] No lyrics found, lyricsState: none');
     }
-    updateLyricsToggleVisibility();
 
     // Re-enable click-to-seek even without synced lyrics
     if (syncSessionId === mySessionId) {
@@ -1073,10 +1120,10 @@
   function scrollToCurrentLyric() {
     const lyrics = document.getElementById('ytm-ext-synced-lyrics');
     if (!lyrics || lyricsCurrentIndex < 0) return;
-    
+
     const lines = lyrics.querySelectorAll('.synced-line');
     if (lines[lyricsCurrentIndex]) {
-      lines[lyricsCurrentIndex].scrollIntoView({ behavior: 'auto', block: 'center' });
+      lines[lyricsCurrentIndex].scrollIntoView({ behavior: 'instant', block: 'center' });
     }
   }
 
@@ -1122,14 +1169,10 @@
 
     document.body.classList.add('fullscreen-active');
 
-    // Create lyrics toggle button
-    createFullscreenLyricsToggle();
-    updateLyricsToggleVisibility();
-
     // Auto-collapse lyrics panel if no lyrics available
     if (lyricsState === 'none') {
-      document.body.classList.add('fullscreen-lyrics-hidden');
-      console.log('[YTM-Ext:Fullscreen] No lyrics, auto-collapsing lyrics panel');
+      document.body.classList.add('sidebar-collapsed');
+      console.log('[YTM-Ext:Fullscreen] No lyrics, auto-collapsing sidebar');
     }
 
     // After CSS is applied, scroll current line into view (no animation)
@@ -1148,6 +1191,8 @@
   }
 
   function removeFullscreenUI() {
+    isTransitioningFullscreen = false;
+
     // Restore YouTube's native player panels
     const mainPanel = document.querySelector('ytmusic-player-page #main-panel');
     const playerPage = document.querySelector('#player-page');
@@ -1198,7 +1243,10 @@
     return window.getComputedStyle(songImg).display === 'none';
   }
 
+  let fullscreenInitialized = false;
   function initFullscreen() {
+    if (fullscreenInitialized) return;
+    fullscreenInitialized = true;
     document.addEventListener('fullscreenchange', () => {
       isFullscreen = !!document.fullscreenElement;
       if (isFullscreen) {
@@ -1207,9 +1255,7 @@
         }
       } else {
         removeFullscreenUI();
-        document.body.classList.remove('fullscreen-lyrics-hidden');
       }
-      updateLyricsToggleVisibility();
     });
   }
 
@@ -1246,17 +1292,20 @@
     container.id = 'ytm-ext-unified-art';
     container.classList.add('hidden');
 
+    const wrapper = document.createElement('div');
+    wrapper.id = 'ytm-ext-art-wrapper';
+    wrapper.style.position = 'relative';
+    wrapper.style.display = 'inline-block';
+
     const img = document.createElement('img');
     img.id = 'ytm-ext-unified-art-img';
     img.alt = 'Album Art';
 
-    container.appendChild(img);
+    wrapper.appendChild(img);
+    container.appendChild(wrapper);
     document.body.appendChild(container);
 
     console.log('[YTM-Ext:UnifiedArt] Container created and added to body');
-
-    document.body.classList.add('ytm-ext-active');
-    console.log('[YTM-Ext:UnifiedArt] Added ytm-ext-active class to body');
 
     updateUnifiedAlbumArt();
   }
@@ -1270,6 +1319,13 @@
     }
     if (!img) {
       return;
+    }
+
+    // Move player buttons into art wrapper (for positioning relative to image)
+    const wrapper = document.getElementById('ytm-ext-art-wrapper');
+    const playerButtons = document.querySelector('.top-row-buttons');
+    if (playerButtons && wrapper && !wrapper.contains(playerButtons)) {
+      wrapper.appendChild(playerButtons);
     }
 
     // Check video mode FIRST
@@ -1289,22 +1345,25 @@
 
     container.classList.remove('hidden');
 
-    // Skip if same URL
+    // Skip if same URL or crossfade already in progress
     if (img.src === url) {
       return;
     }
+    if (isCrossfading) return;
 
-    console.log('[YTM-Ext:UnifiedArt] Starting crossfade animation');
+    isCrossfading = true;
     img.classList.add('fading-out');
 
     setTimeout(() => {
       img.src = url;
       img.onload = () => {
-        console.log('[YTM-Ext:UnifiedArt] Image loaded successfully');
         img.classList.remove('fading-out');
+        isCrossfading = false;
       };
       img.onerror = (e) => {
-        console.error('[YTM-Ext:UnifiedArt] ERROR: Image failed to load!', e);
+        console.error('[YTM-Ext:UnifiedArt] Image failed to load!', e);
+        img.classList.remove('fading-out');
+        isCrossfading = false;
       };
     }, 300);
   }
@@ -1351,60 +1410,32 @@
 
     localStorage.setItem('ytm-ext-sidebar-collapsed', isCollapsed);
     console.log('[YTM-Ext:Sidebar] Saved to localStorage:', isCollapsed);
+
+    // If expanding, instantly scroll lyrics to current position after CSS applies
+    if (wasCollapsed && !isCollapsed) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          scrollToCurrentLyric();
+        });
+      });
+    }
   }
 
   // ============================================
-  // FULLSCREEN LYRICS TOGGLE
+  // VISIBILITY SCROLL FIX (Comet browser: only document.hidden polling works)
   // ============================================
 
-  function createFullscreenLyricsToggle() {
-    console.log('[YTM-Ext:Fullscreen] createFullscreenLyricsToggle() called');
+  function initVisibilityScrollFix() {
+    if (visibilityScrollInterval) clearInterval(visibilityScrollInterval);
+    let wasHidden = document.hidden;
 
-    if (document.getElementById('ytm-ext-lyrics-toggle')) {
-      console.log('[YTM-Ext:Fullscreen] Toggle already exists, skipping');
-      return;
-    }
-
-    const btn = document.createElement('button');
-    btn.id = 'ytm-ext-lyrics-toggle';
-    btn.setAttribute('aria-label', 'Toggle lyrics');
-    btn.style.display = 'none';
-    document.body.appendChild(btn);
-
-    btn.addEventListener('click', toggleFullscreenLyrics);
-
-    console.log('[YTM-Ext:Fullscreen] Lyrics toggle button created');
-
-    updateLyricsToggleVisibility();
-  }
-
-  function toggleFullscreenLyrics() {
-    console.log('[YTM-Ext:Fullscreen] toggleFullscreenLyrics() called');
-
-    const wasHidden = document.body.classList.contains('fullscreen-lyrics-hidden');
-    document.body.classList.toggle('fullscreen-lyrics-hidden');
-    const isHidden = document.body.classList.contains('fullscreen-lyrics-hidden');
-
-    console.log('[YTM-Ext:Fullscreen] Lyrics visibility:', wasHidden ? 'hidden' : 'shown', '->', isHidden ? 'hidden' : 'shown');
-  }
-
-  function updateLyricsToggleVisibility() {
-    const btn = document.getElementById('ytm-ext-lyrics-toggle');
-    if (!btn) {
-      return;
-    }
-
-    const inFullscreen = document.body.classList.contains('fullscreen-active');
-    const hasLyrics = currentSongHasLyrics;
-    const shouldShow = inFullscreen && hasLyrics;
-
-    console.log('[YTM-Ext:Fullscreen] updateLyricsToggleVisibility:', {
-      inFullscreen,
-      hasLyrics,
-      shouldShow
-    });
-
-    btn.style.display = shouldShow ? 'flex' : 'none';
+    visibilityScrollInterval = setInterval(() => {
+      const isHidden = document.hidden;
+      if (wasHidden && !isHidden) {
+        requestAnimationFrame(() => scrollToCurrentLyric());
+      }
+      wasHidden = isHidden;
+    }, 100);
   }
 
   // ============================================
@@ -1414,22 +1445,23 @@
   window.ytmExtDebug = {
     verify: verifyUnifiedArtState,
     toggleSidebar: toggleSidebar,
-    toggleLyrics: toggleFullscreenLyrics,
     updateArt: updateUnifiedAlbumArt,
     getState: () => ({
       sidebarCollapsed: document.body.classList.contains('sidebar-collapsed'),
       fullscreenActive: document.body.classList.contains('fullscreen-active'),
-      lyricsHidden: document.body.classList.contains('fullscreen-lyrics-hidden'),
       videoMode: document.body.classList.contains('video-mode'),
       hasLyrics: currentSongHasLyrics,
       lyricsState: lyricsState
     })
   };
 
-  console.log('[YTM-Ext] Debug functions available: window.ytmExtDebug.verify(), .toggleSidebar(), .toggleLyrics(), .updateArt(), .getState()');
+  console.log('[YTM-Ext] Debug functions available: window.ytmExtDebug.verify(), .toggleSidebar(), .updateArt(), .getState()');
 
   function init() {
     console.log('[YTM-Ext] Initializing extension...');
+
+    // Track initial page state for slide-in animation
+    wasOnWatchPage = isNowPlayingPage();
 
     // Run pre-flight checks
     if (!preFlightCheck()) {
@@ -1444,13 +1476,13 @@
     // New unified album art and sidebar
     createUnifiedAlbumArt();
     createSidebarToggle();
-    createFullscreenLyricsToggle();
 
     initObserver();
     initUrlObserver();
     initLyricsSync();
     initFullscreen();
     initMiniPlayerAutoClose();
+    initVisibilityScrollFix();
     initKeyboardShortcuts();
 
     // Update unified album art periodically (clear any existing interval first)
