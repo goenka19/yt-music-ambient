@@ -363,7 +363,7 @@ body.ambient-active.layout-shift-up ytmusic-player-page #main-panel {
   left: 0;
   width: 100%;
   height: calc(100vh - 80px);
-  z-index: 9998;
+  z-index: 100;
   display: flex;
   background: transparent;
   pointer-events: auto;
@@ -452,7 +452,7 @@ ytmusic-app:fullscreen ytmusic-player-bar {
 }
 
 #ytm-ext-fullscreen {
-  z-index: 9998 !important;
+  z-index: 100 !important;
 }
 
 /* ============================================
@@ -531,7 +531,7 @@ body.ytm-ext-active .top-row-buttons {
   top: 10px !important;
   right: 10px !important;
   left: auto !important;
-  z-index: 10 !important;
+  z-index: 5 !important;
   pointer-events: auto !important;
 }
 
@@ -581,7 +581,7 @@ body.ytm-ext-active.video-mode #song-image {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: 1;
   pointer-events: none;
   background: transparent !important;
 }
@@ -701,7 +701,7 @@ body.sidebar-collapsed ytmusic-tab-renderer {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 6px;
   cursor: pointer;
-  z-index: 100;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -739,7 +739,7 @@ body.sidebar-collapsed #ytm-ext-sidebar-toggle {
 
 /* Ensure sidebar toggle is above fullscreen container */
 body.fullscreen-active #ytm-ext-sidebar-toggle {
-  z-index: 10000 !important;
+  z-index: 102 !important;
 }
 
 /* Hide sidebar toggle in native video fullscreen */
@@ -783,7 +783,7 @@ body.ytm-ext-active #av-id {
   right: 30% !important;
   display: flex !important;
   justify-content: center !important;
-  z-index: 101 !important;
+  z-index: 3 !important;
   pointer-events: none !important;
 }
 
@@ -801,7 +801,7 @@ body.ytm-ext-active.sidebar-collapsed #av-id {
     5. FULLSCREEN MODE
     ---------------------------------------- */
 body.fullscreen-active #ytm-ext-unified-art {
-  z-index: 9999;
+  z-index: 101;
   left: 5%;
   right: 50%;
 }

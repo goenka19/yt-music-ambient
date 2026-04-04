@@ -20,6 +20,12 @@ This update consolidates the album art and track information (title/artist) into
     *   **Verified Hiding**: Uses JS-based inline style setting + `MutationObserver` to ensure YouTube Music's native JS doesn't override our hiding logic.
     *   **Grace Period**: A 1-second grace period after entering fullscreen prevents the controls from appearing immediately due to the click that triggered it.
 
+3.  **Z-Index Refactoring**
+    *   Lowered z-index values for all extension elements to prevent them from covering native YouTube Music UI (like search suggestions).
+    *   **Normal Mode**: Elements now sit in the `1-5` range.
+    *   **Fullscreen Mode**: Elements now sit in the `100-105` range.
+    *   This ensures native overlays (z-index 1000+) correctly appear on top of the extension.
+
 ## Implementation Details
 
 ### Component Structure (`#ytm-ext-unified-art`)
@@ -41,8 +47,9 @@ This update consolidates the album art and track information (title/artist) into
 
 #### `styles.css`
 *   **Static Typography**: Title is set to **18px** and Artist to **14px** across all modes. All `transition` and `scaling` rules have been removed to ensure a perfectly solid UI.
-*   **Flexbox Grouping**: `#ytm-ext-unified-art` uses `flex-direction: column; align-items: center; justify-content: center` to center both the art and the text together.
+*   **Flexbox Grouping**: `#ytm-ext-unified-art` uses `align-items: center; justify-content: center` to center the art. The text is absolutely positioned below it.
 *   **Anchored Buttons**: The `#ytm-ext-art-wrapper` uses `display: inline-block`, ensuring that absolute-positioned buttons (Shuffle, Repeat) remain attached to the top-right corner of the image, not the screen edge.
+*   **Z-Index Fix**: Moved extension UI to lower z-index layers (`1-102`) so native search and menus work properly.
 
 #### `content.js`
 *   **Persistent Component**: `createUnifiedAlbumArt()` initializes the component once. The `#ytm-ext-art-wrapper` is set back to `inline-block` for correct button positioning.
@@ -59,5 +66,6 @@ This update consolidates the album art and track information (title/artist) into
 ### 2. Button Placement
 *   Verified that player buttons (Shuffle/Repeat) are correctly positioned relative to the album art (top-right), not floating at the edge of the screen.
 
-### 3. Visibility
+### 3. Visibility & Search
 *   Verified that the player bar properly hides and reveals in fullscreen based on mouse activity.
+*   Verified that the native Search bar and results now appear **on top** of the extension UI.
