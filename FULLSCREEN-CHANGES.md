@@ -14,13 +14,18 @@ This update consolidates the album art and track information (title/artist) into
     *   Responsive layout that automatically shifts when the sidebar is toggled or when entering fullscreen.
     *   **Fixed Scaling**: Title/Artist text uses a single, consistent font size across all modes (18px for title, 14px for artist) to prevent visual "pumping" or animation during transitions.
 
-2.  **Fullscreen Auto-Hide Player Bar**
+2.  **Robust Artist Extraction & Display**
+    *   **Full Artist List**: Updated extraction logic to capture all artists (e.g., "Artist A & Artist B") instead of just the first one.
+    *   **Smart Parsing**: Automatically removes album/year info (anything after the `•` dot) from the subtitle to keep the display focused.
+    *   **Multi-line Support**: The artist name can now wrap up to 2 lines, ensuring collaborators and long names are readable without breaking the layout.
+
+3.  **Fullscreen Auto-Hide Player Bar**
     *   The player bar (controls) is hidden by default in fullscreen mode.
     *   Controls appear on mouse movement and auto-hide after 3 seconds of inactivity.
     *   **Verified Hiding**: Uses JS-based inline style setting + `MutationObserver` to ensure YouTube Music's native JS doesn't override our hiding logic.
     *   **Grace Period**: A 1-second grace period after entering fullscreen prevents the controls from appearing immediately due to the click that triggered it.
 
-3.  **Z-Index Refactoring**
+4.  **Z-Index Refactoring**
     *   Lowered z-index values for all extension elements to prevent them from covering native YouTube Music UI (like search suggestions).
     *   **Normal Mode**: Elements now sit in the `1-5` range.
     *   **Fullscreen Mode**: Elements now sit in the `100-105` range.
@@ -35,10 +40,10 @@ This update consolidates the album art and track information (title/artist) into
   <div id="ytm-ext-art-wrapper" style="position: relative; display: inline-block;">
     <img id="ytm-ext-unified-art-img" alt="Album Art">
     <!-- top-row-buttons are anchored here to the top-right of the image -->
-  </div>
-  <div class="unified-song-info">
-    <div class="unified-song-title">Song Name</div>
-    <div class="unified-song-artist">Artist Name</div>
+    <div class="unified-song-info">
+      <div class="unified-song-title">Song Name</div>
+      <div class="unified-song-artist">Artist Name</div>
+    </div>
   </div>
 </div>
 ```
@@ -46,26 +51,26 @@ This update consolidates the album art and track information (title/artist) into
 ### Key Changes
 
 #### `styles.css`
-*   **Static Typography**: Title is set to **18px** and Artist to **14px** across all modes. All `transition` and `scaling` rules have been removed to ensure a perfectly solid UI.
+*   **Static Typography**: Title is set to **18px** and Artist to **14px** across all modes.
+*   **Artist Wrap**: Used `-webkit-line-clamp: 2` to allow artist names to wrap while maintaining centering.
 *   **Flexbox Grouping**: `#ytm-ext-unified-art` uses `align-items: center; justify-content: center` to center the art. The text is absolutely positioned below it.
-*   **Anchored Buttons**: The `#ytm-ext-art-wrapper` uses `display: inline-block`, ensuring that absolute-positioned buttons (Shuffle, Repeat) remain attached to the top-right corner of the image, not the screen edge.
 *   **Z-Index Fix**: Moved extension UI to lower z-index layers (`1-102`) so native search and menus work properly.
 
 #### `content.js`
-*   **Persistent Component**: `createUnifiedAlbumArt()` initializes the component once. The `#ytm-ext-art-wrapper` is set back to `inline-block` for correct button positioning.
-*   **JS-based Hiding**: `createFullscreenUI()` sets `opacity: 0, translateY(100%)` via inline styles with `!important`.
-*   **MutationObserver**: Watches `ytmusic-player-bar` for attribute changes to counter YouTube's attempts to reset the style.
-*   **Unified Updates**: `updateUnifiedAlbumArt()` (runs every 2s) updates both the art URL and the text for the entire component.
+*   **Improved Extraction**: `getArtistName()` now reads the full subtitle and splits by the middle dot (`•`).
+*   **Persistent Component**: `createUnifiedAlbumArt()` initializes the component once.
+*   **JS-based Hiding**: `createFullscreenUI()` sets inline styles with `!important` and uses a `MutationObserver` to maintain the state.
 
 ## Verification
 
-### 1. Movement
-*   Verified that when the sidebar collapses, the entire component shifts left/right and re-centers automatically.
-*   Verified that entering/exiting fullscreen keeps the text perfectly static (no scaling animation).
+### 1. Multi-Artist Display
+*   Verified that songs with multiple artists now show all names (e.g., "Artist A & Artist B") rather than just the first one.
+*   Verified that album titles are correctly filtered out from the artist line.
 
-### 2. Button Placement
-*   Verified that player buttons (Shuffle/Repeat) are correctly positioned relative to the album art (top-right), not floating at the edge of the screen.
+### 2. Movement
+*   Verified that when the sidebar collapses, the entire component shifts left/right and re-centers automatically.
+*   Verified that entering/exiting fullscreen keeps the text perfectly static.
 
 ### 3. Visibility & Search
-*   Verified that the player bar properly hides and reveals in fullscreen based on mouse activity.
+*   Verified that the player bar properly hides and reveals in fullscreen.
 *   Verified that the native Search bar and results now appear **on top** of the extension UI.

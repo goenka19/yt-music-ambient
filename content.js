@@ -1327,8 +1327,13 @@
   }
 
   function getArtistName() {
-    const artist = document.querySelector('.content-info-wrapper .subtitle a');
-    if (artist) return artist.textContent.trim();
+    const subtitle = document.querySelector('.content-info-wrapper .subtitle');
+    if (subtitle) {
+      // Get the full text (e.g., "Artist A & Artist B • Album • 2024")
+      const text = subtitle.textContent.trim();
+      // Split by the middle dot (•) and take the first part (the artists)
+      return text.split('•')[0].trim();
+    }
 
     const parts = document.title.split(' - ');
     return parts[1]?.trim() || '';
@@ -1959,6 +1964,14 @@
           // YTM has native lyrics - enhance them
           currentSongTitle = getSongTitle();
           enhanceLyrics(lyricsElement);
+        } else if (!containerExists && lyricsElement && lyricsElement.dataset.synced === 'true') {
+          // Container was removed (by tab switch) but dataset.synced is still set
+          // This happens when user switches away from Lyrics tab and returns
+          // Clear flag and re-enhance to restore lyrics
+          delete lyricsElement.dataset.synced;
+          lyricsElement.style.cssText = '';
+          currentSongTitle = getSongTitle();
+          enhanceLyrics(lyricsElement);
         } else if (!containerExists && !lyricsElement && pendingLyricsData) {
           // We have pending lyrics but no tab - try to render them
           currentSongTitle = getSongTitle();
@@ -1978,6 +1991,13 @@
         // User is NOT on Lyrics tab - clear any pending data to prevent stale injection
         if (pendingLyricsData) {
           pendingLyricsData = null;
+        }
+
+        // Remove container if it exists in wrong tab (YTM moves shelf elements between tabs)
+        const containerExists = document.getElementById('ytm-ext-synced-lyrics');
+        if (containerExists && !isContainerInLyricsTab(containerExists)) {
+          console.log('[YTM-Ext:Lyrics] MutationObserver: Container found in wrong tab, removing');
+          containerExists.remove();
         }
       }
     });

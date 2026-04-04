@@ -485,21 +485,17 @@ ytmusic-app:fullscreen ytmusic-player-bar {
 .unified-song-artist {
   color: rgba(255, 255, 255, 0.6);
   font-size: 14px; /* Fixed size across modes */
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2; /* Allow up to 2 lines for multiple artists */
+  -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: min(500px, 40vw);
   margin: 0 auto;
+  line-height: 1.4;
 }
 
 /* No scaling for fullscreen mode */
-body.fullscreen-active .unified-song-title {
-  max-width: min(500px, 40vw);
-}
-
-body.fullscreen-active .unified-song-artist {
-  max-width: min(500px, 40vw);
-}
 
 /* =============================================
    UNIFIED ALBUM ART - Round 2 CSS
