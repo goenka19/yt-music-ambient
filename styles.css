@@ -455,6 +455,52 @@ ytmusic-app:fullscreen ytmusic-player-bar {
   z-index: 9998 !important;
 }
 
+/* ============================================
+   UNIFIED SONG INFO - Below Album Art
+   ============================================ */
+
+.unified-song-info {
+  display: block;
+  text-align: center;
+  pointer-events: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  margin-top: 16px;
+}
+
+.unified-song-title {
+  color: #fff;
+  font-size: 18px; /* Fixed size across modes */
+  font-weight: 600;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(500px, 40vw);
+  margin: 0 auto;
+}
+
+.unified-song-artist {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px; /* Fixed size across modes */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(500px, 40vw);
+  margin: 0 auto;
+}
+
+/* No scaling for fullscreen mode */
+body.fullscreen-active .unified-song-title {
+  max-width: min(500px, 40vw);
+}
+
+body.fullscreen-active .unified-song-artist {
+  max-width: min(500px, 40vw);
+}
+
 /* =============================================
    UNIFIED ALBUM ART - Round 2 CSS
    ============================================= */
@@ -529,7 +575,7 @@ body.ytm-ext-active.video-mode #song-image {
 #ytm-ext-unified-art {
   position: fixed;
   top: 8vh;
-  left: 1%;
+  left: 5%;
   right: 30%;
   height: calc(100vh - 80px - 8vh);
   display: flex;
@@ -594,6 +640,16 @@ body.ytm-ext-active #av-id.slide-in {
   opacity: 1;
 }
 
+/* Hide player buttons by default, reveal on hover */
+#ytm-ext-art-wrapper .top-row-buttons {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+#ytm-ext-art-wrapper:hover .top-row-buttons {
+  opacity: 1;
+}
+
 body.fullscreen-active #ytm-ext-art-wrapper::before {
   display: none;
 }
@@ -613,7 +669,13 @@ body:not(.ambient-active) #ytm-ext-sidebar-toggle {
     3. SIDEBAR COLLAPSED STATE
     ---------------------------------------- */
 body.sidebar-collapsed #ytm-ext-unified-art {
+  left: 5%;
   right: 5%;
+}
+
+/* Push video down slightly on small screens when sidebar collapsed */
+body.video-mode.sidebar-collapsed #movie_player {
+  margin-top: 15px !important;
 }
 
 body.sidebar-collapsed ytmusic-player-queue,
@@ -680,20 +742,58 @@ body.fullscreen-active #ytm-ext-sidebar-toggle {
   z-index: 10000 !important;
 }
 
+/* Hide sidebar toggle in native video fullscreen */
+body.video-fullscreen #ytm-ext-sidebar-toggle {
+  display: none !important;
+}
+
+/* Hide ambient background in native video fullscreen */
+body.video-fullscreen .ambient-container {
+  display: none !important;
+}
+
+/* Restore opaque backgrounds in video fullscreen to prevent white bands */
+body.video-fullscreen {
+  background: #000000 !important;
+}
+
+body.video-fullscreen html {
+  background: #000000 !important;
+}
+
+body.video-fullscreen ytmusic-app-layout {
+  background: #000000 !important;
+}
+
+body.video-fullscreen ytmusic-app-layout > [slot="player-bar-background"] {
+  background: rgba(0, 0, 0, 0.9) !important;
+}
+
+body.video-fullscreen ytmusic-player-bar {
+  background: rgba(0, 0, 0, 0.9) !important;
+}
+
 /* Icon stays same in collapsed state */
 
 /* Center Song/Video toggle above album art */
 body.ytm-ext-active #av-id {
   position: fixed !important;
   top: 10vh !important;
-  left: 1% !important;
+  left: 5% !important;
   right: 30% !important;
   display: flex !important;
   justify-content: center !important;
   z-index: 101 !important;
+  pointer-events: none !important;
+}
+
+/* Allow clicks on actual Song/Video toggle buttons */
+body.ytm-ext-active #av-id > * {
+  pointer-events: auto !important;
 }
 
 body.ytm-ext-active.sidebar-collapsed #av-id {
+  left: 5% !important;
   right: 5% !important;
 }
 
@@ -707,6 +807,7 @@ body.fullscreen-active #ytm-ext-unified-art {
 }
 
 body.fullscreen-active.sidebar-collapsed #ytm-ext-unified-art {
+  left: 5%;
   right: 5%;
 }
 

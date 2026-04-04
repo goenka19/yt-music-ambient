@@ -12,6 +12,7 @@
     shiftUpEnabled: false,
     reducedSizeEnabled: false
   };
+  let originalButtonsParent = null;
 
   const ALBUM_ART_SELECTORS = [
     'ytmusic-player-bar .image',
@@ -75,7 +76,7 @@
     document.body.classList.toggle('ambient-active', shouldShowAmbient);
     document.body.classList.toggle('ytm-ext-active', shouldShowAmbient);
 
-    if (ambientContainer) {
+    if (ambientContainer && !document.body.classList.contains('video-fullscreen')) {
       ambientContainer.style.display = shouldShowAmbient ? 'block' : 'none';
     }
   }
@@ -549,6 +550,528 @@
     }, 100);
   }
 
+  // ============================================
+  // EQUALIZER AUDIO ENGINE
+  // ============================================
+
+  let audioCtx = null;
+  let audioSource = null;
+  let filters = [];
+  let eqEnabled = true;
+  let eqInitialized = false;
+  let currentVideoId = null;
+  let currentPresetName = 'Custom';
+  let saveTimeout = null;
+  let globalSaveTimeout = null;
+  let songObserverInterval = null;
+  let bypassGain = null;
+  let eqGain = null;
+
+  const EQ_BANDS = [
+    { type: 'lowshelf', freq: 60, label: '60Hz', q: 1 },
+    { type: 'peaking', freq: 250, label: '250Hz', q: 1 },
+    { type: 'peaking', freq: 1000, label: '1kHz', q: 1 },
+    { type: 'peaking', freq: 4000, label: '4kHz', q: 1 },
+    { type: 'highshelf', freq: 16000, label: '16kHz', q: 1 }
+  ];
+
+  const EQ_PRESETS = {
+    'Flat': [0, 0, 0, 0, 0],
+    'Bass Boost': [6, 4, 0, 0, 0],
+    'Treble Boost': [0, 0, 0, 4, 6],
+    'Vocal': [-2, 0, 4, 2, -1],
+    'Electronic': [5, 2, -2, 2, 5],
+    'Rock': [4, 2, -1, 2, 4],
+    'Jazz': [3, 0, 2, 3, 4]
+  };
+
+  function findVideoElement() {
+    return document.querySelector('video');
+  }
+
+  function getCurrentVideoId() {
+    const params = new URLSearchParams(window.location.search);
+    const urlVideoId = params.get('v');
+    if (urlVideoId) return urlVideoId;
+
+    const playerBar = document.querySelector('ytmusic-player-bar');
+    if (playerBar) {
+      return playerBar.getAttribute('video-id') || null;
+    }
+    return null;
+  }
+
+  function initAudioEngine() {
+    if (eqInitialized) {
+      if (audioCtx?.state === 'suspended') {
+        audioCtx.resume();
+      }
+      return true;
+    }
+
+    const video = findVideoElement();
+    if (!video) {
+      console.log('[YTM-Ext:EQ] No video element found');
+      return false;
+    }
+
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+
+      audioSource = audioCtx.createMediaElementSource(video);
+
+      filters = EQ_BANDS.map((band, i) => {
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = band.type;
+        filter.frequency.value = band.freq;
+        filter.Q.value = band.q || 1;
+        filter.gain.value = 0;
+        return filter;
+      });
+
+      bypassGain = audioCtx.createGain();
+      bypassGain.gain.value = 1;
+
+      eqGain = audioCtx.createGain();
+      eqGain.gain.value = 0;
+
+      let lastNode = audioSource;
+      filters.forEach(filter => {
+        lastNode.connect(filter);
+        lastNode = filter;
+      });
+      lastNode.connect(eqGain);
+      eqGain.connect(audioCtx.destination);
+
+      audioSource.connect(bypassGain);
+      bypassGain.connect(audioCtx.destination);
+
+      eqInitialized = true;
+      console.log('[YTM-Ext:EQ] Audio engine initialized');
+
+      syncAudioPath();
+      loadEqSettings();
+      return true;
+    } catch (error) {
+      console.error('[YTM-Ext:EQ] Failed to initialize audio engine:', error);
+      return false;
+    }
+  }
+
+  function syncAudioPath() {
+    if (!audioCtx || !bypassGain || !eqGain) return;
+    const now = audioCtx.currentTime;
+    if (eqEnabled) {
+      bypassGain.gain.setTargetAtTime(0, now, 0.05);
+      eqGain.gain.setTargetAtTime(1, now, 0.05);
+    } else {
+      bypassGain.gain.setTargetAtTime(1, now, 0.05);
+      eqGain.gain.setTargetAtTime(0, now, 0.05);
+    }
+  }
+
+  function setEqBand(bandIndex, gain) {
+    if (!eqEnabled || !eqInitialized || !filters[bandIndex]) return;
+    const clampedGain = Math.max(-12, Math.min(12, gain));
+    filters[bandIndex].gain.setTargetAtTime(clampedGain, audioCtx.currentTime, 0.01);
+  }
+
+  function applyEqBands(gains) {
+    if (!eqEnabled || !eqInitialized) return;
+    if (!Array.isArray(gains)) return;
+    gains.forEach((gain, i) => {
+      if (filters[i] !== undefined) {
+        filters[i].gain.value = gain;
+      }
+    });
+  }
+
+  function applyEqPreset(presetName) {
+    const gains = EQ_PRESETS[presetName];
+    if (!gains) return;
+    applyEqBands(gains);
+  }
+
+  async function loadEqSettings() {
+    const videoId = getCurrentVideoId();
+    console.log('[YTM-Ext:EQ] Loading EQ for video:', videoId);
+
+    chrome.storage.local.get(['eqEnabled', 'eq_global'], (data) => {
+      eqEnabled = data.eqEnabled !== false;
+
+      if (videoId) {
+        const songKey = `eq_track_${videoId}`;
+        chrome.storage.local.get([songKey, 'eq_global'], (result) => {
+          if (result[songKey]) {
+            console.log('[YTM-Ext:EQ] Found saved EQ for song');
+            applyEqBands(result[songKey].bands);
+            currentPresetName = result[songKey].preset || 'Custom';
+          } else if (result.eq_global) {
+            console.log('[YTM-Ext:EQ] Applying global EQ');
+            applyEqBands(result.eq_global.bands);
+            currentPresetName = result.eq_global.preset || 'Custom';
+          }
+        });
+      } else if (data.eq_global) {
+        applyEqBands(data.eq_global.bands);
+        currentPresetName = data.eq_global.preset || 'Custom';
+      }
+    });
+  }
+
+  async function onSongChange(videoId) {
+    if (!videoId || videoId === currentVideoId) return;
+    console.log('[YTM-Ext:EQ] Song changed to:', videoId);
+    currentVideoId = videoId;
+
+    const songKey = `eq_track_${videoId}`;
+    const result = await new Promise(resolve => {
+      chrome.storage.local.get([songKey, 'eq_global'], resolve);
+    });
+
+    if (result[songKey]) {
+      console.log('[YTM-Ext:EQ] Found saved EQ for new song');
+      applyEqBands(result[songKey].bands);
+      currentPresetName = result[songKey].preset || 'Custom';
+    } else if (result.eq_global) {
+      console.log('[YTM-Ext:EQ] Applying global EQ');
+      applyEqBands(result.eq_global.bands);
+      currentPresetName = result.eq_global.preset || 'Custom';
+    }
+  }
+
+  function saveSongEQ(videoId, bands, presetName) {
+    const songKey = `eq_track_${videoId}`;
+    const settings = { preset: presetName || 'Custom', bands };
+
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => {
+      const obj = {};
+      obj[songKey] = settings;
+      chrome.storage.local.set(obj, () => {
+        console.log('[YTM-Ext:EQ] Saved EQ for song:', videoId);
+      });
+    }, 1000);
+  }
+
+  function resetSongEQ(videoId) {
+    const songKey = `eq_track_${videoId}`;
+    chrome.storage.local.remove([songKey], () => {
+      console.log('[YTM-Ext:EQ] Reset EQ for song:', videoId);
+    });
+    applyGlobalEq();
+    currentPresetName = 'Custom';
+  }
+
+  function applyGlobalEq() {
+    chrome.storage.local.get(['eq_global'], (result) => {
+      if (result.eq_global) {
+        applyEqBands(result.eq_global.bands);
+        currentPresetName = result.eq_global.preset || 'Custom';
+      } else {
+        applyEqBands([0, 0, 0, 0, 0]);
+        currentPresetName = 'Flat';
+      }
+    });
+  }
+
+  function saveGlobalEQ(bands, presetName) {
+    const settings = { preset: presetName || 'Custom', bands };
+    clearTimeout(globalSaveTimeout);
+    globalSaveTimeout = setTimeout(() => {
+      chrome.storage.local.set({ eq_global: settings }, () => {
+        console.log('[YTM-Ext:EQ] Saved global EQ');
+      });
+    }, 500);
+  }
+
+  function getEqState() {
+    const gains = filters.map(f => f.gain.value);
+    return {
+      enabled: eqEnabled,
+      initialized: eqInitialized,
+      bands: gains,
+      preset: currentPresetName,
+      videoId: currentVideoId
+    };
+  }
+
+  async function checkHasCustomEQ(videoId) {
+    const cacheKey = `eq_track_${videoId}`;
+    const result = await new Promise(resolve => {
+      chrome.storage.local.get([cacheKey], resolve);
+    });
+    return !!result[cacheKey];
+  }
+
+  function handleEqMessage(message, sendResponse) {
+    switch (message.type) {
+      case 'init':
+        const success = initAudioEngine();
+        currentVideoId = getCurrentVideoId();
+        sendResponse({ success, state: getEqState() });
+        break;
+
+      case 'getState':
+        sendResponse({ state: getEqState() });
+        break;
+
+      case 'setBand':
+        setEqBand(message.band, message.gain);
+        const newBands = filters.map(f => f.gain.value);
+        const newPreset = detectPreset(newBands);
+        currentPresetName = newPreset;
+        saveGlobalEQ(newBands, newPreset);
+        sendResponse({ success: true, state: getEqState() });
+        break;
+
+      case 'applyPreset':
+        applyEqPreset(message.preset);
+        const presetBands = EQ_PRESETS[message.preset];
+        currentPresetName = message.preset;
+        saveGlobalEQ(presetBands, message.preset);
+        sendResponse({ success: true, state: getEqState() });
+        break;
+
+      case 'toggle':
+        eqEnabled = message.enabled;
+        chrome.storage.local.set({ eqEnabled });
+        syncAudioPath();
+        sendResponse({ success: true, state: getEqState() });
+        break;
+
+      case 'saveSong':
+        const bandsToSave = message.bands || filters.map(f => f.gain.value);
+        saveSongEQ(message.videoId || currentVideoId, bandsToSave, message.preset);
+        sendResponse({ success: true });
+        break;
+
+      case 'resetSong':
+        resetSongEQ(message.videoId || currentVideoId);
+        sendResponse({ success: true });
+        break;
+
+      case 'getCurrentVideoId':
+        sendResponse({ videoId: getCurrentVideoId() });
+        break;
+
+      case 'hasCustomEQ':
+        checkHasCustomEQ(message.videoId || currentVideoId).then(hasCustom => {
+          sendResponse({ hasCustom });
+        });
+        return;
+
+      case 'getVideoId':
+        sendResponse({ videoId: currentVideoId });
+        break;
+
+      case 'flat':
+        applyEqBands([0, 0, 0, 0, 0]);
+        currentPresetName = 'Flat';
+        saveGlobalEQ([0, 0, 0, 0, 0], 'Flat');
+        sendResponse({ success: true, state: getEqState() });
+        break;
+
+      case 'getCustomPresets':
+        getCustomPresets().then(presets => {
+          sendResponse({ presets });
+        });
+        return;
+
+      case 'saveCustomPreset':
+        saveCustomPreset(message.name, message.bands).then(id => {
+          const videoId = message.videoId || currentVideoId;
+          if (message.applyTo === 'global') {
+            saveGlobalEQ(message.bands, message.name);
+          } else if (message.applyTo === 'song' && videoId) {
+            saveSongEQ(videoId, message.bands, message.name);
+          }
+          // Apply EQ bands to audio after saving
+          applyEqBands(message.bands);
+          currentPresetName = message.name;
+          sendResponse({ success: true, id });
+        });
+        return;
+
+      case 'renameCustomPreset':
+        renameCustomPreset(message.id, message.name).then(result => {
+          sendResponse({ success: result });
+        });
+        return;
+
+      case 'deleteCustomPreset':
+        deleteCustomPreset(message.id).then(result => {
+          sendResponse({ success: result });
+        });
+        return;
+
+      case 'applyCustomPreset':
+        getCustomPresets().then(presets => {
+          const customPreset = presets[message.id];
+          if (customPreset) {
+            applyEqBands(customPreset.bands);
+            currentPresetName = customPreset.name;
+            saveGlobalEQ(customPreset.bands, customPreset.name);
+          }
+          sendResponse({ success: !!customPreset, state: getEqState() });
+        });
+        return;
+
+      case 'exportPresets':
+        chrome.storage.local.get(null, (allData) => {
+          const exportData = {
+            eq_custom_presets: allData.eq_custom_presets || {},
+            eq_global: allData.eq_global,
+            eq_enabled: allData.eqEnabled
+          };
+          sendResponse({ data: exportData });
+        });
+        return;
+
+      case 'importPresets':
+        if (message.data) {
+          const custom = message.data.eq_custom_presets || {};
+          getCustomPresets().then(existing => {
+            const merged = { ...existing, ...custom };
+            chrome.storage.local.set({ eq_custom_presets: merged }, () => {
+              sendResponse({ success: true });
+            });
+          });
+        } else {
+          sendResponse({ success: false });
+        }
+        return;
+    }
+  }
+
+  function detectPreset(gains) {
+    for (const [name, presetGains] of Object.entries(EQ_PRESETS)) {
+      if (JSON.stringify(gains) === JSON.stringify(presetGains)) {
+        return name;
+      }
+    }
+    return 'Custom';
+  }
+
+  function generateUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
+  async function getCustomPresets() {
+    return new Promise(resolve => {
+      chrome.storage.local.get(['eq_custom_presets'], (result) => {
+        resolve(result.eq_custom_presets || {});
+      });
+    });
+  }
+
+  async function saveCustomPreset(name, bands) {
+    const presets = await getCustomPresets();
+    const id = generateUUID();
+    presets[id] = { name, bands };
+    return new Promise(resolve => {
+      chrome.storage.local.set({ eq_custom_presets: presets }, () => {
+        resolve(id);
+      });
+    });
+  }
+
+  async function renameCustomPreset(id, newName) {
+    const presets = await getCustomPresets();
+    if (presets[id]) {
+      presets[id].name = newName;
+      return new Promise(resolve => {
+        chrome.storage.local.set({ eq_custom_presets: presets }, () => {
+          resolve(true);
+        });
+      });
+    }
+    return false;
+  }
+
+  async function deleteCustomPreset(id) {
+    const presets = await getCustomPresets();
+    if (presets[id]) {
+      delete presets[id];
+      return new Promise(resolve => {
+        chrome.storage.local.set({ eq_custom_presets: presets }, () => {
+          resolve(true);
+        });
+      });
+    }
+    return false;
+  }
+
+  function initEqMessageHandler() {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message.action === 'EQ') {
+        handleEqMessage(message, sendResponse);
+        return true;
+      }
+    });
+    console.log('[YTM-Ext:EQ] Message handler registered');
+  }
+
+  let videoObserver = null;
+  function initVideoObserver() {
+    if (videoObserver) return;
+
+    videoObserver = new MutationObserver(() => {
+      if (eqInitialized && !findVideoElement()) {
+        console.log('[YTM-Ext:EQ] Video element removed, marking for reinit');
+        eqInitialized = false;
+      }
+    });
+
+    videoObserver.observe(document.body, { childList: true, subtree: true });
+    console.log('[YTM-Ext:EQ] Video observer started');
+  }
+
+  function initSongObserver() {
+    if (songObserverInterval) return;
+
+    let lastUrl = window.location.href;
+
+    function checkSongChange() {
+      const videoId = getCurrentVideoId();
+      if (videoId && videoId !== currentVideoId) {
+        onSongChange(videoId);
+      }
+    }
+
+    function checkUrlChange() {
+      if (window.location.href !== lastUrl) {
+        lastUrl = window.location.href;
+        setTimeout(checkSongChange, 500);
+      }
+    }
+
+    songObserverInterval = setInterval(checkUrlChange, 1000);
+    console.log('[YTM-Ext:EQ] Song observer started');
+
+    document.addEventListener('ytmusic-player-bar', checkSongChange);
+
+    const originalPushState = history.pushState;
+    history.pushState = function() {
+      originalPushState.apply(this, arguments);
+      setTimeout(checkUrlChange, 500);
+    };
+  }
+
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'visible' && audioCtx?.state === 'suspended') {
+      await audioCtx.resume();
+    }
+  });
+
   let keyboardShortcutsInitialized = false;
   function initKeyboardShortcuts() {
     if (keyboardShortcutsInitialized) return;
@@ -566,6 +1089,7 @@
 
       // 'Shift+S' for sidebar toggle (prevents conflict with YouTube's 'S')
       if (e.key.toLowerCase() === 's' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (isFullscreen && isVideoModeV2()) return;
         e.preventDefault();
         e.stopPropagation();
         toggleSidebar();
@@ -589,11 +1113,16 @@
   let isFullscreen = false;
   let fullscreenContainer = null;
   let originalLyricsParent = null;
+  let previousTabIndex = 0;
+  let sidebarWasActive = false;
   let lyricsScrollPosition = 0;
   let lyricsCurrentIndex = -1;
   let isTransitioningFullscreen = false;
   let isVideoReady = true;
   let syncSessionId = 0;
+  let pendingLyricsData = null; // Store lyrics for lazy-load retry
+  let lyricsRenderInProgress = false; // Debounce flag to prevent multiple Tier 3 retries
+  let enhanceNullInFlight = false; // Guard against enhanceLyrics(null) spam from Observer
 
   // ============================================
   // UNIFIED ALBUM ART & SIDEBAR - Variables
@@ -604,6 +1133,53 @@
   let isCrossfading = false;
   let wasOnWatchPage = false;
   let visibilityScrollInterval = null;
+
+  function enableLyricsTabIfDisabled() {
+    const tabs = document.querySelectorAll('tp-yt-paper-tab.tab-header.ytmusic-player-page');
+    for (const tab of tabs) {
+      if (tab.textContent?.trim().toLowerCase() === 'lyrics') {
+        if (tab.hasAttribute('disabled')) {
+          tab.removeAttribute('disabled');
+          tab.removeAttribute('aria-disabled');
+          tab.style.pointerEvents = '';
+          return true;
+        }
+        return false;
+      }
+    }
+    return false;
+  }
+
+  function isOnLyricsTab() {
+    const tabs = document.querySelectorAll('tp-yt-paper-tab.tab-header.ytmusic-player-page');
+    for (const tab of tabs) {
+      if (tab.getAttribute('aria-selected') === 'true') {
+        return tab.textContent?.trim().toLowerCase() === 'lyrics';
+      }
+    }
+    return false;
+  }
+
+  function isOnPlayerPage() {
+    return !!document.querySelector('ytmusic-player-page');
+  }
+
+  // Query ONLY Lyrics tab element by page-type attribute (never Related tab)
+  function getLyricsTabElement() {
+    const lyricsRenderer = document.querySelector('ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]');
+    if (!lyricsRenderer) return null;
+
+    return lyricsRenderer.querySelector('ytmusic-description-shelf-renderer yt-formatted-string.description');
+  }
+
+  // Validate that lyrics container is child of Lyrics tab renderer
+  function isContainerInLyricsTab(container) {
+    if (!container || !document.body.contains(container)) return false;
+
+    // Check if container is inside a Lyrics tab renderer
+    const parentRenderer = container.closest('ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]');
+    return !!parentRenderer;
+  }
 
   // ============================================
   // LOGGING & DEBUG INFRASTRUCTURE
@@ -780,27 +1356,201 @@
     return div.innerHTML;
   }
 
+  // Helper: Try to click Lyrics tab button to force render lazy-loaded content
+  function clickLyricsTabToRender() {
+    console.log('[YTM-Ext:Lyrics] Tier 2: Trying to click Lyrics tab button...');
+    const tabButtons = document.querySelectorAll('tp-yt-paper-tab.tab-header.ytmusic-player-page');
+    let lyricsTabButton = null;
+    
+    // Find Lyrics tab button
+    for (const tab of tabButtons) {
+      if (tab.textContent?.trim().toLowerCase() === 'lyrics') {
+        lyricsTabButton = tab;
+        break;
+      }
+    }
+    
+    if (!lyricsTabButton) {
+      console.log('[YTM-Ext:Lyrics] Tier 2 FAIL: No Lyrics tab button found');
+      return false;
+    }
+    
+    // Enable if disabled
+    if (lyricsTabButton.hasAttribute('disabled')) {
+      lyricsTabButton.removeAttribute('disabled');
+      lyricsTabButton.removeAttribute('aria-disabled');
+      lyricsTabButton.style.pointerEvents = '';
+      console.log('[YTM-Ext:Lyrics] Tier 2: Enabled disabled Lyrics tab button');
+    }
+    
+    // Click it
+    lyricsTabButton.click();
+    console.log('[YTM-Ext:Lyrics] Tier 2: Clicked Lyrics tab button');
+    return true;
+  }
+
+  // Helper: Create fallback container in main panel
+  function createFallbackContainer() {
+    console.log('[YTM-Ext:Lyrics] Tier 3: Creating fallback container...');
+    
+    // Try various parent selectors
+    const selectors = [
+      '#music-detail-page',
+      '#player-page',
+      'ytmusic-player-page',
+      '#main-panel'
+    ];
+    
+    let parent = null;
+    for (const sel of selectors) {
+      parent = document.querySelector(sel);
+      if (parent) {
+        console.log('[YTM-Ext:Lyrics] Tier 3: Found parent:', sel);
+        break;
+      }
+    }
+    
+    if (!parent) {
+      console.error('[YTM-Ext:Lyrics] Tier 3 FAIL: No parent found');
+      return null;
+    }
+    
+    const container = document.createElement('div');
+    container.id = 'ytm-ext-synced-lyrics';
+    container.style.cssText = `
+      position: fixed !important;
+      top: 50% !important;
+      left: 50% !important;
+      transform: translate(-50%, -50%) !important;
+      width: 90% !important;
+      max-width: 600px !important;
+      max-height: 70vh !important;
+      overflow-y: auto !important;
+      background: rgba(0,0,0,0.85) !important;
+      padding: 20px !important;
+      color: #fff !important;
+      font-size: 28px !important;
+      line-height: 2.2 !important;
+      z-index: 9999 !important;
+      border-radius: 12px !important;
+    `;
+    document.body.appendChild(container);
+    console.log('[YTM-Ext:Lyrics] Tier 3: Created fallback container (centered overlay)');
+    return container;
+  }
+
   function renderSyncedLyrics(originalElement, lyrics) {
-    // Find the shelf renderer (parent container for lyrics)
-    const shelfRenderer = originalElement.closest('ytmusic-description-shelf-renderer');
-    if (!shelfRenderer) {
-      console.error('[YTM-Ext] Could not find shelf renderer');
+    // Check if container already exists
+    let syncedContainer = document.getElementById('ytm-ext-synced-lyrics');
+
+    // NEW: If container exists but is in wrong tab, remove it
+    if (syncedContainer && !isContainerInLyricsTab(syncedContainer)) {
+      console.log('[YTM-Ext:Lyrics] Container found in wrong tab, removing');
+      syncedContainer.remove();
+      syncedContainer = null; // Force recreation
+    }
+
+    // CRITICAL: Only render if on Lyrics tab or if we have an existing container to update
+    // This prevents rendering to Related/Up Next tabs during transitions
+    if (!syncedContainer && !isOnLyricsTab()) {
+      console.log('[YTM-Ext:Lyrics] Not on Lyrics tab and no container, aborting render');
       return;
     }
 
-    let syncedContainer = document.getElementById('ytm-ext-synced-lyrics');
-    if (!syncedContainer) {
-      syncedContainer = document.createElement('div');
-      syncedContainer.id = 'ytm-ext-synced-lyrics';
-      shelfRenderer.appendChild(syncedContainer);
+    // TIER 1: originalElement provided - use its shelf renderer
+    let shelfRenderer = null;
+    let targetParent = null;
+    
+    if (originalElement) {
+      shelfRenderer = originalElement.closest('ytmusic-description-shelf-renderer');
+      if (shelfRenderer) {
+        // Verify shelf is inside Lyrics tab, not Up Next or Related
+        const lyricsTabRenderer = shelfRenderer.closest('ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]');
+        if (lyricsTabRenderer) {
+          targetParent = shelfRenderer;
+          console.log('[YTM-Ext:Lyrics] Tier 1 SUCCESS: Found shelfRenderer in Lyrics tab');
+        } else {
+          console.log('[YTM-Ext:Lyrics] Tier 1 FAIL: shelfRenderer not in Lyrics tab');
+        }
+      }
+    }
+    
+    // TIER 2: Find Lyrics tab renderer by page-type
+    if (!targetParent) {
+      console.log('[YTM-Ext:Lyrics] Tier 1 FAIL, trying Tier 2...');
+      const lyricsRenderer = document.querySelector('ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]');
+      if (lyricsRenderer) {
+        const shelf = lyricsRenderer.querySelector('ytmusic-description-shelf-renderer');
+        if (shelf) {
+          shelfRenderer = shelf;
+          targetParent = shelf;
+          console.log('[YTM-Ext:Lyrics] Tier 2 SUCCESS: Found shelf in Lyrics tab');
+        } else {
+          targetParent = lyricsRenderer;
+          console.log('[YTM-Ext:Lyrics] Tier 2 SUCCESS: Lyrics tab (no shelf, will replace message)');
+        }
+      } else {
+        console.log('[YTM-Ext:Lyrics] Tier 2 FAIL: Lyrics tab not active');
+      }
+    }
+    
+    // TIER 3: No Lyrics tab - click the button and let Observer handle it
+    if (!targetParent && !syncedContainer && !lyricsRenderInProgress) {
+      console.log('[YTM-Ext:Lyrics] Tier 2 failed, trying Tier 3...');
+      lyricsRenderInProgress = true;
+      pendingLyricsData = lyrics;
+      const clicked = clickLyricsTabToRender();
+      if (clicked) {
+        console.log('[YTM-Ext:Lyrics] Tier 3: Clicked tab, waiting for MutationObserver...');
+        return; // Let MutationObserver detect when tab appears
+      } else {
+        lyricsRenderInProgress = false;
+        pendingLyricsData = null;
+        console.log('[YTM-Ext:Lyrics] Tier 3 FAIL: Could not click Lyrics tab, cleared pending data');
+      }
+    }
+    
+    // TIER 4: All tiers failed — log and return (no floating overlay)
+    if (!targetParent && !syncedContainer) {
+      console.error('[YTM-Ext:Lyrics] ALL TIERS FAILED');
+      lyricsRenderInProgress = false;
+      return;
     }
 
-    // Hide ALL original content in shelfRenderer (except our container)
-    Array.from(shelfRenderer.children).forEach(child => {
-      if (child.id !== 'ytm-ext-synced-lyrics') {
-        child.style.display = 'none';
+    // Create container if needed
+    if (!syncedContainer && targetParent) {
+      syncedContainer = document.createElement('div');
+      syncedContainer.id = 'ytm-ext-synced-lyrics';
+
+      if (!shelfRenderer && targetParent.tagName?.toLowerCase() === 'ytmusic-tab-renderer') {
+        // No shelf (YTM has no lyrics) — insert before message renderer
+        const messageRenderer = targetParent.querySelector('ytmusic-message-renderer');
+        if (messageRenderer) {
+          targetParent.insertBefore(syncedContainer, messageRenderer);
+        } else {
+          targetParent.appendChild(syncedContainer);
+        }
+      } else {
+        // Shelf exists — append inside shelf (identical to main)
+        targetParent.appendChild(syncedContainer);
       }
-    });
+    }
+
+    // Hide original content
+    if (shelfRenderer) {
+      // Case A: Shelf exists — hide all shelf children except our container
+      Array.from(shelfRenderer.children).forEach(child => {
+        if (child.id !== 'ytm-ext-synced-lyrics') {
+          child.style.display = 'none';
+        }
+      });
+    } else if (targetParent?.tagName?.toLowerCase() === 'ytmusic-tab-renderer') {
+      // Case B: No shelf — hide only the message renderer, keep queue visible
+      const messageRenderer = targetParent.querySelector('ytmusic-message-renderer');
+      if (messageRenderer) {
+        messageRenderer.style.display = 'none';
+      }
+    }
 
     // Apple Music style container
     syncedContainer.style.cssText = 'display:block !important; width:100%; color:#fff; font-size:28px; line-height:2.2;';
@@ -809,9 +1559,15 @@
       .map((line, i) => `<div class="synced-line" data-time="${line.time}" data-index="${i}">${escapeHtml(line.text)}</div>`)
       .join('');
 
-    const rect = syncedContainer.getBoundingClientRect();
-    console.log('[YTM-Ext] Container rect:', rect.width, 'x', rect.height, 'at', rect.x, rect.y);
-    console.log('[YTM-Ext] Parent:', syncedContainer.parentElement?.tagName);
+    // Clear pending lyrics since we rendered successfully
+    if (pendingLyricsData) {
+      pendingLyricsData = null;
+    }
+
+    // Clear render in progress flag
+    if (lyricsRenderInProgress) {
+      lyricsRenderInProgress = false;
+    }
 
     // Add click-to-seek (remove old handler to prevent accumulation)
     if (lyricsClickHandler) {
@@ -933,16 +1689,24 @@
   }
 
   async function enhanceLyrics(element) {
-    // Mark as processed
-    element.dataset.synced = 'processing';
-    console.log('[YTM-Ext] enhanceLyrics called');
+    // Don't inject lyrics in video mode or non-player pages
+    if (isVideoModeV2()) return;
+    if (!isOnPlayerPage()) return;
+
+    // If no element (YTM has no lyrics), we'll still fetch and render synced lyrics
+    if (element) {
+      element.dataset.synced = 'processing';
+    }
+    console.log('[YTM-Ext] enhanceLyrics called, element:', element ? 'provided' : 'null (YTM has no lyrics)');
 
     const title = getSongTitle();
     const artist = getArtistName();
     console.log('[YTM-Ext] Song:', title, 'Artist:', artist);
 
     if (!title) {
-      element.dataset.synced = 'failed';
+      if (element) {
+        element.dataset.synced = 'failed';
+      }
       console.log('[YTM-Ext] No title found, aborting');
       return;
     }
@@ -977,14 +1741,19 @@
         console.log('[YTM-Ext] Parsed', parsed.length, 'lines');
         if (parsed.length > 0) {
           console.log('[YTM-Ext] First 3 lines:', parsed.slice(0, 3));
+          // Store in pendingLyricsData for lazy-load retry
+          pendingLyricsData = parsed;
           renderSyncedLyrics(element, parsed);
           // Use requestAnimationFrame to ensure DOM is ready before syncing
           requestAnimationFrame(() => {
             startSync(parsed, mySessionId);
           });
-          element.dataset.synced = 'true';
+          if (element) {
+            element.dataset.synced = 'true';
+          }
           lyricsState = 'synced';
           currentSongHasLyrics = true;
+          enhanceNullInFlight = false;
           console.log('[YTM-Ext] Sync started successfully, lyricsState: synced');
           return;
         }
@@ -994,11 +1763,13 @@
     }
 
     // Keep original lyrics if sync fails - check if plain lyrics exist
-    element.dataset.synced = 'failed';
+    if (element) {
+      element.dataset.synced = 'failed';
+    }
     console.log('[YTM-Ext] Sync failed, checking for plain lyrics');
 
-    // Check if plain lyrics exist
-    const plainLyricsText = element.textContent?.trim() || '';
+    // Check if plain lyrics exist (only if element exists)
+    const plainLyricsText = element ? (element.textContent?.trim() || '') : '';
     if (plainLyricsText.length > 50) {
       lyricsState = 'plain';
       currentSongHasLyrics = true;
@@ -1009,10 +1780,17 @@
       console.log('[YTM-Ext] No lyrics found, lyricsState: none');
     }
 
+    // If in fullscreen and no synced lyrics found, collapse sidebar
+    if (isFullscreen && lyricsState === 'none') {
+      document.body.classList.add('sidebar-collapsed');
+      console.log('[YTM-Ext:Fullscreen] No synced lyrics available, collapsing sidebar');
+    }
+
     // Re-enable click-to-seek even without synced lyrics
     if (syncSessionId === mySessionId) {
       isVideoReady = true;
     }
+    enhanceNullInFlight = false;
   }
 
   function checkSongChange() {
@@ -1023,7 +1801,7 @@
       lyricsCurrentIndex = -1; // Reset current index for new song
       isVideoReady = false;
       syncSessionId++;
-      console.log('[YTM-Ext] Song changed, disabling click-to-seek, session:', syncSessionId);
+      enhanceNullInFlight = false;
 
       // Clear old sync interval
       if (syncInterval) {
@@ -1036,6 +1814,19 @@
       if (oldContainer) {
         oldContainer.remove();
       }
+      originalLyricsParent = null;
+
+      // Clear dataset.synced ONLY from Lyrics tab elements when song changes
+      // This ensures the new song's lyrics element doesn't have stale dataset.synced
+      const lyricsTab = document.querySelector('ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]');
+      if (lyricsTab) {
+        const lyricsTabElements = lyricsTab.querySelectorAll('ytmusic-description-shelf-renderer yt-formatted-string.description');
+        lyricsTabElements.forEach(el => {
+          if (el.dataset.synced) {
+            delete el.dataset.synced;
+          }
+        });
+      }
 
       // Update fullscreen album art if in fullscreen
       if (isFullscreen) {
@@ -1045,26 +1836,45 @@
       // Update unified album art
       updateUnifiedAlbumArt();
 
-      // Reset synced state on lyrics element
-      const lyricsElement = document.querySelector(
-        'ytmusic-tab-renderer:not([page-type="MUSIC_PAGE_TYPE_TRACK_RELATED"]) ytmusic-description-shelf-renderer yt-formatted-string.description'
-      );
-      if (lyricsElement) {
-        delete lyricsElement.dataset.synced;
-        lyricsElement.style.cssText = ''; // Unhide it
-        enhanceLyrics(lyricsElement);
-        
-        // If in fullscreen, move lyrics and scroll after enhanceLyrics completes
-        if (isFullscreen) {
+      // Reset synced state on lyrics element (skip in video mode or non-Lyrics tab)
+      if (isVideoModeV2()) return;
+      if (isOnLyricsTab()) {
+        const lyricsElement = getLyricsTabElement();
+        const containerExists = document.getElementById('ytm-ext-synced-lyrics');
+
+        if (lyricsElement && !lyricsElement.dataset.synced) {
+          // YTM has native lyrics - enhance them
+          delete lyricsElement.dataset.synced;
+          lyricsElement.style.cssText = '';
+          enhanceLyrics(lyricsElement);
+
+          // If in fullscreen, move lyrics after enhanceLyrics completes
+          if (isFullscreen) {
+            setTimeout(() => {
+              const lyrics = document.getElementById('ytm-ext-synced-lyrics');
+              const fullscreenWrapper = document.querySelector('#ytm-ext-fullscreen-lyrics');
+              if (lyrics && fullscreenWrapper && lyrics.parentElement !== fullscreenWrapper) {
+                originalLyricsParent = lyrics.parentElement;
+                fullscreenWrapper.appendChild(lyrics);
+              }
+            }, 200);
+          }
+        } else if (!containerExists && !lyricsElement && pendingLyricsData) {
+          // We have pending lyrics but no tab - render them
+          currentSongTitle = getSongTitle();
+          renderSyncedLyrics(null, pendingLyricsData);
+          pendingLyricsData = null;
+        } else if (containerExists && pendingLyricsData) {
+          // Container exists but we have new pending lyrics - update content
+          renderSyncedLyrics(null, pendingLyricsData);
+          pendingLyricsData = null;
+        } else if (!containerExists && !lyricsElement && !enhanceNullInFlight) {
+          // YTM has NO lyrics - trigger fetch
+          enhanceNullInFlight = true;
+          currentSongTitle = getSongTitle();
           setTimeout(() => {
-            const lyrics = document.getElementById('ytm-ext-synced-lyrics');
-            const fullscreenWrapper = document.querySelector('#ytm-ext-fullscreen-lyrics');
-            if (lyrics && fullscreenWrapper && lyrics.parentElement !== fullscreenWrapper) {
-              originalLyricsParent = lyrics.parentElement;
-              fullscreenWrapper.appendChild(lyrics);
-            }
-            // Don't scroll - keep at current position
-          }, 200);
+            enhanceLyrics(null);
+          }, 100);
         }
       }
     }
@@ -1073,41 +1883,194 @@
   function initLyricsSync() {
     if (lyricsObserver) return;
 
+    // Enable disabled Lyrics tab on user click and render synced lyrics
+    document.addEventListener('click', (e) => {
+      if (isVideoModeV2()) return;
+      const tab = e.target.closest('tp-yt-paper-tab.tab-header.ytmusic-player-page');
+      if (!tab) return;
+      
+      // Enable if disabled
+      enableLyricsTabIfDisabled();
+      
+      // Check if user clicked Lyrics tab (by text, not index)
+      if (tab.textContent?.trim().toLowerCase() === 'lyrics') {
+        const lyricsElement = getLyricsTabElement();
+        const containerExists = document.getElementById('ytm-ext-synced-lyrics');
+        
+        if (!lyricsElement && !containerExists) {
+          // YTM has no lyrics - render our synced lyrics
+          currentSongTitle = getSongTitle();
+          enhanceLyrics(null);
+        }
+      }
+    }, { passive: true });
+
+    // Shared state for video→song transition recovery
+    let wasInVideoForFix = false;
+    let lyricsTabFixApplied = false;
+    let switchedTabForVideoMode = false;
+
     // Watch for lyrics panel to appear AND song changes
     lyricsObserver = new MutationObserver(() => {
-      // Check for song changes
       checkSongChange();
 
-      // Check for new lyrics element
-      const lyricsElement = document.querySelector(
-        'ytmusic-tab-renderer:not([page-type="MUSIC_PAGE_TYPE_TRACK_RELATED"]) ytmusic-description-shelf-renderer yt-formatted-string.description'
-      );
-      if (lyricsElement && !lyricsElement.dataset.synced) {
-        currentSongTitle = getSongTitle();
-        enhanceLyrics(lyricsElement);
+      if (!isOnPlayerPage()) return;
+
+      if (isVideoModeV2()) {
+        // Clear sync in video mode (prevents stale state accumulation)
+        if (syncInterval) {
+          clearInterval(syncInterval);
+          syncInterval = null;
+        }
+        // Signal to interval that we've been in video mode
+        lyricsTabFixApplied = false;
+        wasInVideoForFix = true;
+
+        // Switch from Lyrics to Up Next on video entry (once per transition)
+        if (!switchedTabForVideoMode) {
+          const tabs = document.querySelectorAll('tp-yt-paper-tab.tab-header.ytmusic-player-page');
+          for (const tab of tabs) {
+            if (tab.getAttribute('aria-selected') === 'true' && tab.textContent?.trim() === 'Lyrics') {
+              for (const t of tabs) {
+                if (t.textContent?.trim() === 'Up next') {
+                  t.click();
+                  console.log('[YTM-Ext] Switched to Up Next tab (video mode)');
+                  break;
+                }
+              }
+              break;
+            }
+          }
+          switchedTabForVideoMode = true;
+        }
+
+        return;
+      }
+
+      // Reset video tab switch flag when back in song mode
+      switchedTabForVideoMode = false;
+
+      // Only attempt lyrics injection when on Lyrics tab
+      if (isOnLyricsTab()) {
+        const lyricsElement = getLyricsTabElement();
+        const containerExists = document.getElementById('ytm-ext-synced-lyrics');
+
+        if (lyricsElement && !lyricsElement.dataset.synced) {
+          // YTM has native lyrics - enhance them
+          currentSongTitle = getSongTitle();
+          enhanceLyrics(lyricsElement);
+        } else if (!containerExists && !lyricsElement && pendingLyricsData) {
+          // We have pending lyrics but no tab - try to render them
+          currentSongTitle = getSongTitle();
+          renderSyncedLyrics(null, pendingLyricsData);
+          pendingLyricsData = null;
+        } else if (containerExists && pendingLyricsData) {
+          // Container exists but we have new pending lyrics - update content
+          renderSyncedLyrics(null, pendingLyricsData);
+          pendingLyricsData = null;
+        } else if (!containerExists && !lyricsElement && !enhanceNullInFlight) {
+          // No lyrics anywhere - trigger fetch
+          enhanceNullInFlight = true;
+          currentSongTitle = getSongTitle();
+          enhanceLyrics(null);
+        }
+      } else {
+        // User is NOT on Lyrics tab - clear any pending data to prevent stale injection
+        if (pendingLyricsData) {
+          pendingLyricsData = null;
+        }
       }
     });
 
     lyricsObserver.observe(document.body, { childList: true, subtree: true });
 
-    // Also check immediately
-    const lyricsElement = document.querySelector(
-      'ytmusic-tab-renderer:not([page-type="MUSIC_PAGE_TYPE_TRACK_RELATED"]) ytmusic-description-shelf-renderer yt-formatted-string.description'
-    );
-    if (lyricsElement && !lyricsElement.dataset.synced) {
-      currentSongTitle = getSongTitle();
-      enhanceLyrics(lyricsElement);
-      
-      // If already in fullscreen, move lyrics there
-      if (isFullscreen) {
-        setTimeout(() => {
-          const lyrics = document.getElementById('ytm-ext-synced-lyrics');
-          const fullscreenWrapper = document.querySelector('#ytm-ext-fullscreen-lyrics');
-          if (lyrics && fullscreenWrapper && lyrics.parentElement !== fullscreenWrapper) {
-            originalLyricsParent = lyrics.parentElement;
-            fullscreenWrapper.appendChild(lyrics);
-          }
-        }, 200);
+    // Video→song transition recovery. Handles:
+    // 1. YTM bug: Lyrics tab stays disabled after video→song toggle
+    // 2. Same-song sync recovery: resets lyrics state so MutationObserver re-initializes
+    // Runs every 2s, only acts ONCE per transition (flag-guarded).
+    setInterval(() => {
+      const inVideo = isVideoModeV2();
+
+      if (inVideo) {
+        wasInVideoForFix = true;
+        lyricsTabFixApplied = false;
+        if (syncInterval) {
+          clearInterval(syncInterval);
+          syncInterval = null;
+        }
+        return;
+      }
+
+      if (lyricsTabFixApplied) return;
+
+      // Re-enable Lyrics tab if YTM left it disabled (YTM bug workaround)
+      const tabs = document.querySelectorAll('tp-yt-paper-tab.tab-header.ytmusic-player-page');
+      let lyricsTab = null;
+      for (const tab of tabs) {
+        if (tab.textContent?.trim() === 'Lyrics') {
+          lyricsTab = tab;
+          break;
+        }
+      }
+
+      if (lyricsTab && lyricsTab.hasAttribute('disabled')) {
+        lyricsTab.removeAttribute('disabled');
+        lyricsTab.removeAttribute('aria-disabled');
+        lyricsTab.style.pointerEvents = '';
+        lyricsTab.click();
+        console.log('[YTM-Ext] Re-enabled Lyrics tab (YTM bug workaround)');
+      }
+
+      // Reset lyrics sync state after video→song transition (only if on Lyrics tab)
+      if (wasInVideoForFix && isOnLyricsTab()) {
+        syncSessionId++;
+        const lyricsElement = getLyricsTabElement();
+        if (lyricsElement) {
+          delete lyricsElement.dataset.synced;
+        }
+        const container = document.getElementById('ytm-ext-synced-lyrics');
+        if (container) container.remove();
+        wasInVideoForFix = false;
+        console.log('[YTM-Ext] Reset lyrics state after video→song transition');
+      }
+
+      switchedTabForVideoMode = false;
+      lyricsTabFixApplied = true;
+    }, 2000);
+
+    // Also check immediately (skip in video mode, only on Lyrics tab)
+    if (!isVideoModeV2() && isOnLyricsTab()) {
+      const lyricsElement = getLyricsTabElement();
+      const containerExists = document.getElementById('ytm-ext-synced-lyrics');
+
+      if (lyricsElement && !lyricsElement.dataset.synced) {
+        currentSongTitle = getSongTitle();
+        enhanceLyrics(lyricsElement);
+
+        // If already in fullscreen, move lyrics there
+        if (isFullscreen) {
+          setTimeout(() => {
+            const lyrics = document.getElementById('ytm-ext-synced-lyrics');
+            const fullscreenWrapper = document.querySelector('#ytm-ext-fullscreen-lyrics');
+            if (lyrics && fullscreenWrapper && lyrics.parentElement !== fullscreenWrapper) {
+              originalLyricsParent = lyrics.parentElement;
+              fullscreenWrapper.appendChild(lyrics);
+            }
+          }, 200);
+        }
+      } else if (!containerExists && !lyricsElement && pendingLyricsData) {
+        // We have pending lyrics - render them
+        currentSongTitle = getSongTitle();
+        renderSyncedLyrics(null, pendingLyricsData);
+        pendingLyricsData = null;
+      } else if (containerExists && pendingLyricsData) {
+        // Container exists but we have new pending lyrics - update content
+        renderSyncedLyrics(null, pendingLyricsData);
+        pendingLyricsData = null;
+      } else if (!containerExists && !lyricsElement && !enhanceNullInFlight) {
+        enhanceNullInFlight = true;
+        currentSongTitle = getSongTitle();
+        enhanceLyrics(null);
       }
     }
   }
@@ -1129,6 +2092,18 @@
 
   function createFullscreenUI() {
     if (fullscreenContainer) return;
+
+    // Save sidebar state
+    sidebarWasActive = !document.body.classList.contains('sidebar-collapsed');
+
+    // Save current active tab INDEX
+    let tabs = document.querySelectorAll('tp-yt-paper-tab.tab-header.ytmusic-player-page');
+    for (let i = 0; i < tabs.length; i++) {
+      if (tabs[i].getAttribute('aria-selected') === 'true') {
+        previousTabIndex = i;
+        break;
+      }
+    }
 
     // Hide YouTube's native player panels
     const mainPanel = document.querySelector('ytmusic-player-page #main-panel');
@@ -1167,12 +2142,46 @@
       lyricsWrapper.appendChild(lyricsEl);
     }
 
+    // If sidebar was active, auto-switch to Lyrics tab (index 1)
+    if (sidebarWasActive && previousTabIndex !== 1) {
+      tabs = document.querySelectorAll('tp-yt-paper-tab.tab-header.ytmusic-player-page');
+      if (tabs[1]) {
+        enableLyricsTabIfDisabled();
+        tabs[1].click();
+        console.log('[YTM-Ext:Fullscreen] Auto-switched to Lyrics tab');
+      }
+    }
+
     document.body.classList.add('fullscreen-active');
 
-    // Auto-collapse lyrics panel if no lyrics available
-    if (lyricsState === 'none') {
+    // Hide player bar via inline styles (beats YouTube's CSS overrides)
+    const playerBar = document.querySelector('ytmusic-player-bar');
+    if (playerBar) {
+      playerBar.style.setProperty('opacity', '0', 'important');
+      playerBar.style.setProperty('pointer-events', 'none', 'important');
+      playerBar.style.setProperty('transform', 'translateY(100%)', 'important');
+      playerBar.style.setProperty('transition', 'opacity 0.3s ease, transform 0.3s ease', 'important');
+      if (fsBarObserver) fsBarObserver.disconnect();
+      fsBarObserver = new MutationObserver(() => {
+        if (document.body.classList.contains('fs-controls-visible')) return;
+        playerBar.style.setProperty('opacity', '0', 'important');
+        playerBar.style.setProperty('pointer-events', 'none', 'important');
+        playerBar.style.setProperty('transform', 'translateY(100%)', 'important');
+      });
+      fsBarObserver.observe(playerBar, { attributes: true, attributeFilter: ['style'] });
+    }
+
+    // Grace period: don't show controls on immediate mousemove
+    fsJustEntered = true;
+    setTimeout(() => { fsJustEntered = false; }, 1000);
+
+    // Ensure song info div exists in unified art container
+    ensureSongInfoExists();
+
+    // Auto-collapse based on previous sidebar state
+    if (!sidebarWasActive) {
       document.body.classList.add('sidebar-collapsed');
-      console.log('[YTM-Ext:Fullscreen] No lyrics, auto-collapsing sidebar');
+      console.log('[YTM-Ext:Fullscreen] Sidebar was collapsed, keeping collapsed');
     }
 
     // After CSS is applied, scroll current line into view (no animation)
@@ -1192,6 +2201,35 @@
 
   function removeFullscreenUI() {
     isTransitioningFullscreen = false;
+    document.body.classList.remove('fs-controls-visible');
+    clearTimeout(fsControlsTimeout);
+    fsControlsTimeout = null;
+    fsJustEntered = false;
+
+    // Disconnect MutationObserver and clear inline styles on player bar
+    if (fsBarObserver) { fsBarObserver.disconnect(); fsBarObserver = null; }
+    const playerBar = document.querySelector('ytmusic-player-bar');
+    if (playerBar) {
+      playerBar.style.removeProperty('opacity');
+      playerBar.style.removeProperty('pointer-events');
+      playerBar.style.removeProperty('transform');
+      playerBar.style.removeProperty('transition');
+    }
+
+    // Restore sidebar to original state
+    const isCurrentlyCollapsed = document.body.classList.contains('sidebar-collapsed');
+    if (sidebarWasActive && isCurrentlyCollapsed) {
+      document.body.classList.remove('sidebar-collapsed');
+    } else if (!sidebarWasActive && !isCurrentlyCollapsed) {
+      document.body.classList.add('sidebar-collapsed');
+    }
+
+    // Restore exact tab by index
+    const tabs = document.querySelectorAll('tp-yt-paper-tab.tab-header.ytmusic-player-page');
+    if (tabs[previousTabIndex] && tabs[previousTabIndex].getAttribute('aria-selected') !== 'true') {
+      tabs[previousTabIndex].click();
+      console.log('[YTM-Ext:Fullscreen] Restored tab index:', previousTabIndex);
+    }
 
     // Restore YouTube's native player panels
     const mainPanel = document.querySelector('ytmusic-player-page #main-panel');
@@ -1235,6 +2273,10 @@
     if (img && artUrl) {
       img.src = artUrl;
     }
+    const titleEl = document.querySelector('.unified-song-title');
+    const artistEl = document.querySelector('.unified-song-artist');
+    if (titleEl) titleEl.textContent = getSongTitle() || '';
+    if (artistEl) artistEl.textContent = getArtistName() || '';
   }
 
   function isVideoMode() {
@@ -1249,13 +2291,70 @@
     fullscreenInitialized = true;
     document.addEventListener('fullscreenchange', () => {
       isFullscreen = !!document.fullscreenElement;
+      const videoCheck = isVideoModeV2();
       if (isFullscreen) {
-        if (!isVideoModeV2()) {
+        if (!videoCheck) {
           createFullscreenUI();
+        } else {
+          document.body.classList.add('video-fullscreen');
         }
       } else {
+        document.body.classList.remove('video-fullscreen');
         removeFullscreenUI();
       }
+    });
+  }
+
+  // ============================================
+  // FULLSCREEN - Auto-Hide Controls
+  // ============================================
+
+  let fsControlsTimeout = null;
+  let fsJustEntered = false;
+  let fsBarObserver = null;
+
+  function ensureSongInfoExists() {
+    const container = document.getElementById('ytm-ext-unified-art');
+    if (!container) return;
+    const wrapper = document.getElementById('ytm-ext-art-wrapper');
+    if (!wrapper) return;
+    if (wrapper.querySelector('.unified-song-info')) return;
+    const songInfo = document.createElement('div');
+    songInfo.className = 'unified-song-info';
+    const titleEl = document.createElement('div');
+    titleEl.className = 'unified-song-title';
+    titleEl.textContent = getSongTitle() || '';
+    const artistEl = document.createElement('div');
+    artistEl.className = 'unified-song-artist';
+    artistEl.textContent = getArtistName() || '';
+    songInfo.appendChild(titleEl);
+    songInfo.appendChild(artistEl);
+    wrapper.appendChild(songInfo);
+  }
+
+  function initFullscreenControls() {
+    document.addEventListener('mousemove', () => {
+      if (!document.body.classList.contains('fullscreen-active')) return;
+      if (fsJustEntered) return;
+      document.body.classList.add('fs-controls-visible');
+      clearTimeout(fsControlsTimeout);
+      const playerBar = document.querySelector('ytmusic-player-bar');
+      if (playerBar) {
+        playerBar.style.setProperty('opacity', '1', 'important');
+        playerBar.style.setProperty('pointer-events', 'auto', 'important');
+        playerBar.style.setProperty('transform', 'translateY(0)', 'important');
+      }
+      fsControlsTimeout = setTimeout(() => {
+        document.body.classList.remove('fs-controls-visible');
+        if (document.body.classList.contains('fullscreen-active')) {
+          const pb = document.querySelector('ytmusic-player-bar');
+          if (pb) {
+            pb.style.setProperty('opacity', '0', 'important');
+            pb.style.setProperty('pointer-events', 'none', 'important');
+            pb.style.setProperty('transform', 'translateY(100%)', 'important');
+          }
+        }
+      }, 3000);
     });
   }
 
@@ -1302,12 +2401,61 @@
     img.alt = 'Album Art';
 
     wrapper.appendChild(img);
+
+    const songInfo = document.createElement('div');
+    songInfo.className = 'unified-song-info';
+    const titleEl = document.createElement('div');
+    titleEl.className = 'unified-song-title';
+    titleEl.textContent = getSongTitle() || '';
+    const artistEl = document.createElement('div');
+    artistEl.className = 'unified-song-artist';
+    artistEl.textContent = getArtistName() || '';
+    songInfo.appendChild(titleEl);
+    songInfo.appendChild(artistEl);
+    wrapper.appendChild(songInfo);
+
     container.appendChild(wrapper);
     document.body.appendChild(container);
 
     console.log('[YTM-Ext:UnifiedArt] Container created and added to body');
 
     updateUnifiedAlbumArt();
+  }
+
+  function positionToggleBetweenHeaderAndVideo() {
+    const toggle = document.querySelector('#av-id');
+    if (!toggle) return;
+
+    if (!document.body.classList.contains('video-mode')) {
+      toggle.style.removeProperty('top');
+      return;
+    }
+
+    // Log ALL candidate elements in one pass
+    const candidates = ['#nav-bar-background', '#song-image', '#main-panel', '#song-media-window', 'ytmusic-player video', 'ytmusic-player-page #main-panel'];
+    const rects = {};
+    for (const sel of candidates) {
+      const el = document.querySelector(sel);
+      if (el) {
+        const r = el.getBoundingClientRect();
+        rects[sel] = { top: Math.round(r.top), bottom: Math.round(r.bottom), height: Math.round(r.height) };
+      } else {
+        rects[sel] = null;
+      }
+    }
+
+    const header = document.querySelector('#nav-bar-background');
+    const video = document.querySelector('#song-image');
+    if (!header || !video) return;
+
+    const headerBottom = header.getBoundingClientRect().bottom;
+    const videoTop = video.getBoundingClientRect().top;
+    if (videoTop <= headerBottom) return;
+
+    const toggleHeight = toggle.offsetHeight || 36;
+    const midpoint = (headerBottom + videoTop) / 2;
+    const finalTop = midpoint - toggleHeight / 2;
+    toggle.style.setProperty('top', finalTop + 'px', 'important');
   }
 
   function updateUnifiedAlbumArt() {
@@ -1321,21 +2469,32 @@
       return;
     }
 
-    // Move player buttons into art wrapper (for positioning relative to image)
     const wrapper = document.getElementById('ytm-ext-art-wrapper');
     const playerButtons = document.querySelector('.top-row-buttons');
+
+    // Track buttons' native parent (updates if YTM recreates the element)
     if (playerButtons && wrapper && !wrapper.contains(playerButtons)) {
-      wrapper.appendChild(playerButtons);
+      originalButtonsParent = playerButtons.parentElement;
     }
 
-    // Check video mode FIRST
+    // Check video mode BEFORE moving buttons
     const isVideo = isVideoModeV2();
     if (isVideo) {
       container.classList.add('hidden');
       document.body.classList.add('video-mode');
+      // Return buttons to native parent so they're not hidden with container
+      if (playerButtons && originalButtonsParent && originalButtonsParent.isConnected && wrapper.contains(playerButtons)) {
+        originalButtonsParent.appendChild(playerButtons);
+      }
+      positionToggleBetweenHeaderAndVideo();
       return;
     }
     document.body.classList.remove('video-mode');
+
+    // Album art mode: move buttons into wrapper for hover reveal
+    if (playerButtons && wrapper && !wrapper.contains(playerButtons)) {
+      wrapper.appendChild(playerButtons);
+    }
 
     const url = getAlbumArtUrl();
     if (!url) {
@@ -1344,6 +2503,12 @@
     }
 
     container.classList.remove('hidden');
+
+    // Update song info text
+    const titleEl = document.querySelector('.unified-song-title');
+    const artistEl = document.querySelector('.unified-song-artist');
+    if (titleEl) titleEl.textContent = getSongTitle() || '';
+    if (artistEl) artistEl.textContent = getArtistName() || '';
 
     // Skip if same URL or crossfade already in progress
     if (img.src === url) {
@@ -1393,6 +2558,10 @@
     if (collapsed) {
       document.body.classList.add('sidebar-collapsed');
       console.log('[YTM-Ext:Sidebar] Applied collapsed state from localStorage');
+      // Force YouTube's layout to recalculate after restoring saved state
+      requestAnimationFrame(() => {
+        window.dispatchEvent(new Event('resize'));
+      });
     }
 
     btn.addEventListener('click', toggleSidebar);
@@ -1410,6 +2579,11 @@
 
     localStorage.setItem('ytm-ext-sidebar-collapsed', isCollapsed);
     console.log('[YTM-Ext:Sidebar] Saved to localStorage:', isCollapsed);
+
+    // Force YouTube's layout to recalculate (fixes video staying left-aligned)
+    requestAnimationFrame(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
 
     // If expanding, instantly scroll lyrics to current position after CSS applies
     if (wasCollapsed && !isCollapsed) {
@@ -1481,9 +2655,13 @@
     initUrlObserver();
     initLyricsSync();
     initFullscreen();
+    initFullscreenControls();
     initMiniPlayerAutoClose();
     initVisibilityScrollFix();
     initKeyboardShortcuts();
+    initEqMessageHandler();
+    initVideoObserver();
+    initSongObserver();
 
     // Update unified album art periodically (clear any existing interval first)
     if (mainUpdateInterval) clearInterval(mainUpdateInterval);
@@ -1491,6 +2669,10 @@
       checkAndUpdate();
       updateUnifiedAlbumArt();
     }, 2000);
+
+    window.addEventListener('resize', () => {
+      requestAnimationFrame(positionToggleBetweenHeaderAndVideo);
+    });
 
     console.log('[YTM-Ext] Extension initialized successfully');
   }
