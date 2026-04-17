@@ -210,3 +210,345 @@ body {
 .hidden {
   display: none;
 }
+
+/* ============================================
+   EQUALIZER SECTION
+   ============================================ */
+
+.eq-toggle {
+  margin-left: 8px;
+}
+
+.eq-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.eq-flat-btn {
+  background: #1d1d1d;
+  border: 1px solid #3d3d3d;
+  border-radius: 4px;
+  color: #888888;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.eq-flat-btn:hover {
+  background: #2d2d2d;
+  border-color: #555555;
+  color: #ffffff;
+}
+
+.eq-panel {
+  margin-top: 12px;
+}
+
+.eq-preset-row {
+  margin-bottom: 12px;
+  display: flex;
+  gap: 8px;
+}
+
+.eq-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.eq-action-btn {
+  background: #1d1d1d;
+  border: 1px solid #3d3d3d;
+  border-radius: 4px;
+  color: #888888;
+  padding: 6px 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.eq-action-btn:hover {
+  background: #2d2d2d;
+  border-color: #555555;
+  color: #ffffff;
+}
+
+.eq-action-btn.saved {
+  background: #ff0000;
+  border-color: #ff0000;
+  color: #ffffff;
+}
+
+.eq-action-btn.hidden {
+  display: none;
+}
+
+.eq-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: #3d3d3d;
+  color: #666666;
+}
+
+.eq-action-btn:disabled:hover {
+  background: #1d1d1d;
+  border-color: #3d3d3d;
+}
+
+.eq-preset-select {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  background: #1d1d1d;
+  border: 1px solid #3d3d3d;
+  border-radius: 4px;
+  color: #ffffff;
+  font-size: 13px;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffffff' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+
+.eq-preset-select:hover {
+  border-color: #555555;
+}
+
+.eq-preset-select:focus {
+  outline: none;
+  border-color: #ff0000;
+}
+
+.eq-sliders {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.eq-slider-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.eq-slider-value {
+  font-size: 11px;
+  color: #ff0000;
+  text-align: center;
+  font-weight: 500;
+  width: 28px;
+}
+
+.eq-slider-container {
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.eq-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 44px;
+  height: 4px;
+  background: #3d3d3d;
+  border-radius: 2px;
+  outline: none;
+  transform: rotate(-90deg);
+  transform-origin: center;
+}
+
+.eq-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  background: #ff0000;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.eq-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.eq-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  background: #ff0000;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.eq-label {
+  font-size: 10px;
+  color: #888888;
+}
+
+/* Custom preset optgroup styling */
+.eq-preset-select optgroup {
+  font-weight: 500;
+  color: #aaaaaa;
+}
+
+.eq-preset-select option {
+  padding: 4px 8px;
+  background: #1d1d1d;
+  color: #ffffff;
+}
+
+/* Export/Import buttons */
+.eq-import-export {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #3d3d3d;
+}
+
+.eq-export-btn {
+  flex: 1;
+  background: #1d1d1d;
+  border: 1px solid #3d3d3d;
+  border-radius: 4px;
+  color: #888888;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.eq-export-btn:hover {
+  background: #2d2d2d;
+  border-color: #555555;
+  color: #ffffff;
+}
+
+/* Modal styles */
+.eq-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.eq-modal.hidden {
+  display: none !important;
+}
+
+.eq-modal-content {
+  background: #1d1d1d;
+  border: 1px solid #3d3d3d;
+  border-radius: 8px;
+  padding: 20px;
+  width: 240px;
+  max-width: 90%;
+}
+
+.eq-modal-content h3 {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 16px;
+  color: #ffffff;
+}
+
+.eq-modal-content p {
+  font-size: 12px;
+  color: #aaaaaa;
+  margin-bottom: 12px;
+}
+
+.eq-modal-content input {
+  width: 100%;
+  padding: 10px 12px;
+  background: #0f0f0f;
+  border: 1px solid #3d3d3d;
+  border-radius: 4px;
+  color: #ffffff;
+  font-size: 13px;
+  margin-bottom: 16px;
+  box-sizing: border-box;
+}
+
+.eq-modal-content input:focus {
+  outline: none;
+  border-color: #ff0000;
+}
+
+.eq-modal-content input::placeholder {
+  color: #666666;
+}
+
+.eq-modal-options {
+  margin-bottom: 16px;
+}
+
+.eq-modal-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #aaaaaa;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+
+.eq-modal-options input[type="radio"] {
+  accent-color: #ff0000;
+}
+
+.eq-modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.eq-modal-btn {
+  padding: 8px 16px;
+  background: #2d2d2d;
+  border: 1px solid #3d3d3d;
+  border-radius: 4px;
+  color: #ffffff;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.eq-modal-btn:hover {
+  background: #3d3d3d;
+}
+
+.eq-modal-btn-primary {
+  background: #ff0000;
+  border-color: #ff0000;
+}
+
+.eq-modal-btn-primary:hover {
+  background: #cc0000;
+}
+
+.eq-modal-btn-danger {
+  background: #cc0000;
+  border-color: #cc0000;
+}
+
+.eq-modal-btn-danger:hover {
+  background: #990000;
+}

@@ -40,6 +40,21 @@
 3. If a feature requires flags, say so UPFRONT before implementing
 4. Don't waste tokens on solutions that won't work for the user
 
+### Debugging DOM/CSS Issues
+**NEVER guess selectors or pixel values. ALWAYS verify with diagnostics FIRST.**
+1. Before writing any positioning/selector code, add a SINGLE comprehensive `console.log` that checks ALL candidate selectors and ALL bounding rect values in ONE pass
+2. NEVER assume a CSS selector from `styles.css` will work in `querySelector()` — the element may not exist, may be in shadow DOM, or may have changed
+3. NEVER assume `getBoundingClientRect()` returns what you expect — always log the actual values before writing positioning logic
+4. When debugging, check ALL possible failure points in ONE diagnostic pass, not one at a time across multiple iterations
+5. Each round-trip to the user costs ~$5+ in tokens. Minimize iterations ruthlessly.
+
+6. NEVER trust `getBoundingClientRect()` changes on wrapper elements as proof the visual content moved. YouTube uses nested positioned elements (e.g., `#movie_player` inside `#song-media-window`) -- the wrapper rect can shift while the inner element stays put. Always test on the innermost visual element.
+7. For video positioning: the visible video is `#movie_player`, NOT `#song-media-window`. Target `#movie_player` directly.
+
+**Example failure 1:** Spent ~$75 and 2 sessions trying to position a toggle by guessing CSS values, then using wrong selectors (`ytmusic-header-renderer` didn't exist, `ytmusic-player video` bounding rect didn't match visible area). Should have logged all candidate selectors and their bounding rects in one diagnostic from the start.
+
+**Example failure 2:** Diagnostic confirmed `margin-top` on `#song-media-window` moved its rect by 12px. Shipped the fix. It didn't visually move the video because the actual video is rendered by `#movie_player` (a child with independent positioning). Should have tested on `#movie_player` directly or asked user to visually confirm.
+
 ---
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -300,3 +315,29 @@ Content Script (injected into music.youtube.com)
 - BetterYTM: https://github.com/Sv443/BetterYTM
 - LRCLIB (free synced lyrics): lrclib.net
 - Reversed Musixmatch: https://github.com/Strvm/musicxmatch-api
+
+---
+
+## Browser Testing (Playwright MCP)
+
+### Setup
+- **Playwright MCP** is configured in `~/.config/opencode/opencode.json` (global config)
+- Connects to Chrome via CDP at `ws://localhost:9222`
+- MCP tools available: `browser_navigate`, `browser_snapshot`, `browser_screenshot`, etc.
+
+### Launch Chrome for Testing
+Before testing, launch Chrome with our extension loaded:
+```bash
+cd /Users/ujjwalgoenka/Desktop/Programming/yt-music-ext
+./launch-chrome.sh
+```
+This opens Chrome with:
+- Our extension auto-loaded
+- Remote debugging on port 9222
+- Clean profile at `/tmp/yt-music-ext-chrome-profile`
+
+### Important Session Context
+- **Session summary**: `SESSION.md` - comprehensive context for continuing work
+- **Equalizer plan**: `tasks/equalizer-plan.md` - full implementation plan
+- **Previous research**: Equalizer feasibility verified, architecture designed, ready for implementation
+- **Branch**: `feature/equalizer` - all work happens here until merged

@@ -42,6 +42,13 @@ After making changes, confirm: "Done - I made exactly these changes: [list them]
 
 ---
 
+## Debugging Rules — Token Efficiency
+
+- **ONE diagnostic pass, not many**: When debugging DOM/CSS issues, log ALL candidate selectors and ALL element positions in a SINGLE console.log. Never check one selector per iteration.
+- **Verify before implementing**: Never write positioning code based on assumed selector names or pixel values. Always verify selectors exist and bounding rects return expected values FIRST.
+- **Minimize user round-trips**: Each time you ask the user to test = ~$5+ in tokens. Design diagnostics to capture everything needed in one test.
+- **No blind CSS guessing**: If you don't know an element's position, don't hardcode pixel values. Use JS to read actual positions, but verify the selectors work first.
+
 ## Other Rules
 
 - No unused variables or imports

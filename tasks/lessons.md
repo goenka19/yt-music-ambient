@@ -122,3 +122,41 @@ if (video.currentTime > 5) {
 **Why this works:** A new song ALWAYS starts at time ≈ 0. By waiting for `currentTime < 5`, we ensure the video has actually loaded the new song.
 
 **Rule:** When syncing to media elements, don't just check if the element is "ready" - verify that its time/state makes sense for the CURRENT content. A new song can't start at 346 seconds.
+
+---
+
+### Video Player DOM Hierarchy (2024-03)
+
+**Problem:** Needed to add `margin-top` to push the video down in video mode. Targeted `#song-media-window` based on diagnostic bounding rects. It didn't work -- the actual video is rendered by `#movie_player` (YouTube's embedded player), which is a child of `#song-media-window` but positioned independently.
+
+**Root cause:** YouTube Music's video mode uses this hierarchy:
+```
+#song-media-window (container - our diagnostic showed rect here)
+  └─ #movie_player (YouTube's actual video player - this is what renders)
+       └─ .html5-video-container
+            └─ video.html5-main-video
+```
+
+The diagnostic tested `margin-top` on `#song-media-window` and it "moved" (bounding rect changed), but the visual video didn't move because `#movie_player` has its own positioning inside.
+
+**Fix:** Target `#movie_player` directly, not `#song-media-window`.
+
+**Rule:** When targeting YouTube's video element for positioning:
+1. The visible video is rendered by `#movie_player`, NOT `#song-media-window`
+2. Diagnostics that test bounding rect changes can be misleading -- the rect of a wrapper may shift without the inner positioned element moving visually
+3. Always ask the user to inspect the actual visible element, or test by visually confirming the change (not just rect numbers)
+4. When a diagnostic says "margin worked" but the user says it didn't -- the diagnostic was measuring the wrong thing
+
+---
+
+### Diagnostic Design Failures (2024-03)
+
+**Problem:** Wrote a diagnostic that tested `margin-top` on `#song-media-window`, confirmed the bounding rect moved (+12px), and confidently shipped the fix. It didn't visually move the video.
+
+**Root cause:** The diagnostic measured rect change on the wrapper, not on the actual visual element. A wrapper's rect can change without its absolutely/independently positioned children moving.
+
+**Fix:** Diagnostics for visual positioning must either:
+1. Test on the actual visual element (not a wrapper)
+2. Or ask the user to visually confirm the element moved on screen
+
+**Rule:** Never trust `getBoundingClientRect()` changes on wrapper elements as proof that the visual content inside moved. Test on the innermost visual element, or have the user visually verify.

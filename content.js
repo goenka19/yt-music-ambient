@@ -1,8 +1,13 @@
 (function() {
   'use strict';
 
+  // Prevent multiple init calls on extension reload
+  if (window.__ytmExtLoaded) return;
+  window.__ytmExtLoaded = true;
+
   let ambientContainer = null;
   let currentArtUrl = null;
+  let preloadedFullscreenImg = null; // Preloaded image for fullscreen album art
   let observer = null;
   let mainUpdateInterval = null;
   let miniPlayerAutoCloseInterval = null;
@@ -13,6 +18,15 @@
     reducedSizeEnabled: false
   };
   let originalButtonsParent = null;
+
+  // Named event listener references (for proper removal in destroyExtension)
+  let storageChangeHandler = null;
+  let urlChangeHandler = null;
+  let visibilityChangeHandler = null;
+  let keydownHandler = null;
+  let fullscreenChangeHandler = null;
+  let mousemoveHandler = null;
+  let resizeHandler = null;
 
   const ALBUM_ART_SELECTORS = [
     'ytmusic-player-bar .image',
@@ -37,7 +51,7 @@
   }
 
   // Listen for settings changes
-  chrome.storage.onChanged.addListener((changes, namespace) => {
+  storageChangeHandler = (changes, namespace) => {
     if (namespace === 'local') {
       if (changes.ambientEnabled !== undefined) {
         settings.ambientEnabled = changes.ambientEnabled.newValue;
@@ -53,7 +67,8 @@
       }
       applySettings();
     }
-  });
+  };
+  chrome.storage.onChanged.addListener(storageChangeHandler);
 
   // Apply settings to DOM
   function applySettings() {
@@ -250,6 +265,7 @@
   // ============================================
 
   let pipWindow = null;
+  let pipWindowOpening = false; // Guard against concurrent open attempts
   let pipSyncInterval = null;
   let miniPlayerArmed = false;
 
@@ -279,6 +295,7 @@
         const artUrl = getAlbumArtUrl();
         if (artUrl) {
           const img = new Image();
+          img.onerror = () => {};
           img.src = artUrl;
         }
       }
@@ -315,12 +332,15 @@
       pipWindow.focus();
       return;
     }
+    if (pipWindowOpening) return;
+    pipWindowOpening = true;
 
     try {
       pipWindow = await documentPictureInPicture.requestWindow({
         width: 200,
         height: 200
       });
+      pipWindowOpening = false;
 
       const artUrl = getAlbumArtUrl() || '';
       const title = getSongTitle() || 'No song playing';
@@ -478,6 +498,7 @@
     } catch (error) {
       console.error('[YTM-Ext] Failed to open mini player:', error);
       pipWindow = null;
+      pipWindowOpening = false;
     }
   }
 
@@ -1066,17 +1087,18 @@
     };
   }
 
-  document.addEventListener('visibilitychange', async () => {
+  visibilityChangeHandler = async () => {
     if (document.visibilityState === 'visible' && audioCtx?.state === 'suspended') {
       await audioCtx.resume();
     }
-  });
+  };
+  document.addEventListener('visibilitychange', visibilityChangeHandler);
 
   let keyboardShortcutsInitialized = false;
   function initKeyboardShortcuts() {
     if (keyboardShortcutsInitialized) return;
     keyboardShortcutsInitialized = true;
-    document.addEventListener('keydown', (e) => {
+    keydownHandler = (e) => {
       // Don't trigger when typing in input fields
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
         return;
@@ -1100,7 +1122,8 @@
         e.preventDefault();
         toggleSidebar();
       }
-    });
+    };
+    document.addEventListener('keydown', keydownHandler);
   }
 
   // ============================================
@@ -1833,6 +1856,10 @@
         });
       }
 
+      // Preload album art for fullscreen (instant update on song change)
+      const newArtUrl = getAlbumArtUrl();
+      preloadFullscreenArt(newArtUrl);
+
       // Update fullscreen album art if in fullscreen
       if (isFullscreen) {
         updateFullscreenAlbumArt();
@@ -2290,13 +2317,28 @@
     if (!fullscreenContainer) return;
     const img = fullscreenContainer.querySelector('.fs-album img');
     const artUrl = getAlbumArtUrl();
-    if (img && artUrl) {
+    if (!img || !artUrl) return;
+
+    // Use preloaded image if available and complete (instant update)
+    if (preloadedFullscreenImg && preloadedFullscreenImg.complete && preloadedFullscreenImg.src === artUrl) {
+      img.src = artUrl;
+    } else {
+      // Fallback: set src directly (browser loads it)
       img.src = artUrl;
     }
+
+    // Update song info
     const titleEl = document.querySelector('.unified-song-title');
     const artistEl = document.querySelector('.unified-song-artist');
     if (titleEl) titleEl.textContent = getSongTitle() || '';
     if (artistEl) artistEl.textContent = getArtistName() || '';
+  }
+
+  function preloadFullscreenArt(artUrl) {
+    if (!artUrl) return;
+    preloadedFullscreenImg = new Image();
+    preloadedFullscreenImg.onerror = () => { preloadedFullscreenImg = null; };
+    preloadedFullscreenImg.src = artUrl;
   }
 
   function isVideoMode() {
@@ -2309,7 +2351,7 @@
   function initFullscreen() {
     if (fullscreenInitialized) return;
     fullscreenInitialized = true;
-    document.addEventListener('fullscreenchange', () => {
+    fullscreenChangeHandler = () => {
       isFullscreen = !!document.fullscreenElement;
       const videoCheck = isVideoModeV2();
       if (isFullscreen) {
@@ -2322,7 +2364,8 @@
         document.body.classList.remove('video-fullscreen');
         removeFullscreenUI();
       }
-    });
+    };
+    document.addEventListener('fullscreenchange', fullscreenChangeHandler);
   }
 
   // ============================================
@@ -2353,7 +2396,7 @@
   }
 
   function initFullscreenControls() {
-    document.addEventListener('mousemove', () => {
+    mousemoveHandler = () => {
       if (!document.body.classList.contains('fullscreen-active')) return;
       if (fsJustEntered) return;
       document.body.classList.add('fs-controls-visible');
@@ -2375,7 +2418,8 @@
           }
         }
       }, 3000);
-    });
+    };
+    document.addEventListener('mousemove', mousemoveHandler);
   }
 
   // ============================================
@@ -2651,6 +2695,63 @@
 
   console.log('[YTM-Ext] Debug functions available: window.ytmExtDebug.verify(), .toggleSidebar(), .updateArt(), .getState()');
 
+  // ============================================
+  // CLEANUP & DESTROY
+  // ============================================
+
+  function destroyExtension() {
+    // Clear all intervals
+    if (mainUpdateInterval) { clearInterval(mainUpdateInterval); mainUpdateInterval = null; }
+    if (miniPlayerAutoCloseInterval) { clearInterval(miniPlayerAutoCloseInterval); miniPlayerAutoCloseInterval = null; }
+    if (visibilityScrollInterval) { clearInterval(visibilityScrollInterval); visibilityScrollInterval = null; }
+    if (songObserverInterval) { clearInterval(songObserverInterval); songObserverInterval = null; }
+    if (syncInterval) { clearInterval(syncInterval); syncInterval = null; }
+    if (pipSyncInterval) { clearInterval(pipSyncInterval); pipSyncInterval = null; }
+
+    // Disconnect all observers
+    if (observer) { observer.disconnect(); observer = null; }
+    if (urlObserver) { urlObserver.disconnect(); urlObserver = null; }
+    if (lyricsObserver) { lyricsObserver.disconnect(); lyricsObserver = null; }
+    if (videoObserver) { videoObserver.disconnect(); videoObserver = null; }
+    if (fsBarObserver) { fsBarObserver.disconnect(); fsBarObserver = null; }
+
+    // Remove event listeners
+    if (storageChangeHandler) { chrome.storage.onChanged.removeListener(storageChangeHandler); storageChangeHandler = null; }
+    if (urlChangeHandler) { document.removeEventListener('ytm-ext-url-change', urlChangeHandler); urlChangeHandler = null; }
+    if (visibilityChangeHandler) { document.removeEventListener('visibilitychange', visibilityChangeHandler); visibilityChangeHandler = null; }
+    if (keydownHandler) { document.removeEventListener('keydown', keydownHandler); keydownHandler = null; }
+    if (fullscreenChangeHandler) { document.removeEventListener('fullscreenchange', fullscreenChangeHandler); fullscreenChangeHandler = null; }
+    if (mousemoveHandler) { document.removeEventListener('mousemove', mousemoveHandler); mousemoveHandler = null; }
+    if (resizeHandler) { window.removeEventListener('resize', resizeHandler); resizeHandler = null; }
+
+    // Close PiP if open
+    closePipWindow();
+
+    // Remove created elements
+    const elementsToRemove = [
+      'yt-music-ambient-bg',
+      'ytm-ext-unified-art',
+      'ytm-ext-sidebar-toggle',
+      'ytm-ext-synced-lyrics',
+      'ytm-ext-fullscreen',
+      'yt-music-open-yt',
+      'ytm-ext-pip-btn'
+    ];
+    elementsToRemove.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.remove();
+    });
+
+    // Remove body classes
+    document.body.classList.remove(
+      'ambient-active', 'ytm-ext-active', 'layout-shift-up', 'layout-reduced-size',
+      'sidebar-collapsed', 'fullscreen-active', 'video-mode', 'video-fullscreen',
+      'fs-controls-visible'
+    );
+
+    console.log('[YTM-Ext] Extension destroyed');
+  }
+
   function init() {
     console.log('[YTM-Ext] Initializing extension...');
 
@@ -2690,9 +2791,11 @@
       updateUnifiedAlbumArt();
     }, 2000);
 
-    window.addEventListener('resize', () => {
+    resizeHandler = () => {
       requestAnimationFrame(positionToggleBetweenHeaderAndVideo);
-    });
+    };
+    window.addEventListener('resize', resizeHandler);
+    window.addEventListener('beforeunload', destroyExtension);
 
     console.log('[YTM-Ext] Extension initialized successfully');
   }

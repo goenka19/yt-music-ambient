@@ -31,6 +31,11 @@
     }
   });
 
+  // Clear interval on page unload to prevent orphaned intervals
+  window.addEventListener('unload', function() {
+    clearInterval(intervalId);
+  });
+
   // Notify content script on URL changes (SPA navigation)
   if (!window.__ytmExtHistoryPatched) {
     window.__ytmExtHistoryPatched = true;
