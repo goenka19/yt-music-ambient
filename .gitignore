@@ -1,5 +1,8 @@
 .DS_Store
 ref/
 md/*.jpeg
-.claude/
+.claude/*
+!.claude/settings.json
+!.claude/plans/
+!.claude/plans/*.md
 tasks/

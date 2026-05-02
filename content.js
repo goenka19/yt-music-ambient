@@ -86,14 +86,26 @@
     return window.location.pathname.includes('/watch');
   }
 
+  // YouTube's player gets .ad-showing during pre-roll/mid-roll ads
+  function isAdPlaying() {
+    return !!document.querySelector('#movie_player.ad-showing');
+  }
+
   // Update page state based on URL and settings
   function updatePageState() {
-    const shouldShowAmbient = settings.ambientEnabled && isNowPlayingPage();
+    const onWatch = isNowPlayingPage();
+    const isSettled = document.body.classList.contains('ytm-ext-settled');
+    const containerShouldShow = settings.ambientEnabled && onWatch && !isAdPlaying();
+    // ambient-active makes YouTube backgrounds transparent — only apply once the
+    // player animation has settled (ytm-ext-settled), to avoid a flash on the
+    // home screen while the player is still sliding in.
+    const shouldShowAmbient = containerShouldShow && isSettled;
     document.body.classList.toggle('ambient-active', shouldShowAmbient);
-    document.body.classList.toggle('ytm-ext-active', shouldShowAmbient);
+    document.body.classList.toggle('ytm-ext-active', onWatch && settings.ambientEnabled);
+    if (!onWatch) document.body.classList.remove('ytm-ext-settled');
 
     if (ambientContainer && !document.body.classList.contains('video-fullscreen')) {
-      ambientContainer.style.display = shouldShowAmbient ? 'block' : 'none';
+      ambientContainer.style.display = containerShouldShow ? 'block' : 'none';
     }
   }
 
@@ -175,24 +187,6 @@
     });
   }
 
-  // Slide-in animation for non-/watch → /watch navigation
-  function applySlideInAnimation() {
-    const elements = [
-      document.getElementById('ytm-ext-unified-art'),
-      document.getElementById('ytm-ext-sidebar-toggle'),
-      document.querySelector('#av-id'),
-      ambientContainer
-    ];
-    elements.forEach(el => {
-      if (el) {
-        el.classList.add('slide-in');
-        el.addEventListener('animationend', () => {
-          el.classList.remove('slide-in');
-        }, { once: true });
-      }
-    });
-  }
-
   // Listen for URL changes (YouTube Music is SPA)
   let urlObserver = null;
   function initUrlObserver() {
@@ -204,17 +198,47 @@
         const wasWatch = wasOnWatchPage;
         lastUrl = location.href;
         wasOnWatchPage = isNowPlayingPage();
+
+        if (!wasWatch && isNowPlayingPage()) {
+          // Ensure elements exist before we animate them
+          createUnifiedAlbumArt();
+          createSidebarToggle();
+
+          // Add slide-in SYNCHRONOUSLY before updatePageState() adds ytm-ext-active
+          // (which makes elements visible). First paint shows them at translateY(100vh),
+          // matching YouTube's own open-player-page animation (0.3s cubic-bezier(0.2,0,0.6,1)).
+          const art = document.getElementById('ytm-ext-unified-art');
+          const sidebar = document.getElementById('ytm-ext-sidebar-toggle');
+          [art, sidebar].forEach(el => {
+            if (el) {
+              el.classList.add('slide-in');
+              el.addEventListener('animationend', () => el.classList.remove('slide-in'), { once: true });
+            }
+          });
+
+          // Reset ambient opacity so it can fade in after player settles
+          if (ambientContainer) ambientContainer.style.opacity = '0';
+
+          // After the player animation (~300ms), settle: apply ambient-active and
+          // fade in #av-id + ambient. ambient-active makes YouTube backgrounds transparent —
+          // applying it earlier causes the home screen to flash while the player slides in.
+          setTimeout(() => {
+            if (!isNowPlayingPage()) return;
+            document.body.classList.add('ytm-ext-settled');
+            updatePageState();
+            if (ambientContainer) ambientContainer.style.opacity = '1';
+          }, 350);
+        }
+
         updatePageState();
         checkAndUpdate();
-        // Recreate elements if missing after navigation
-        if (isNowPlayingPage()) {
+        if (isNowPlayingPage() && wasWatch) {
+          // Already on watch (song change etc.): refresh elements, no animation needed
           createUnifiedAlbumArt();
           createSidebarToggle();
           updateUnifiedAlbumArt();
-          // Slide-in only when entering /watch from non-/watch
-          if (!wasWatch) {
-            requestAnimationFrame(() => applySlideInAnimation());
-          }
+        } else if (isNowPlayingPage()) {
+          updateUnifiedAlbumArt();
         }
       }
     }
@@ -1026,6 +1050,16 @@
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.action === 'EQ') {
         handleEqMessage(message, sendResponse);
+        return true;
+      }
+      if (message.action === 'GET_SONG_REMAINING') {
+        const time = getPlayerTime();
+        const duration = getPlayerDuration();
+        if (duration && duration > 0 && time !== null) {
+          sendResponse({ remainingMs: Math.max(1000, (duration - time) * 1000) });
+        } else {
+          sendResponse({ remainingMs: null });
+        }
         return true;
       }
     });

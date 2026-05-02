@@ -138,6 +138,12 @@ body {
   letter-spacing: 2px;
 }
 
+.buttons-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .time-buttons {
   display: flex;
   gap: 8px;

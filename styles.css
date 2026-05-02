@@ -13,6 +13,7 @@
   z-index: -1;
   pointer-events: none;
   overflow: hidden;
+  transition: opacity 0.4s ease;
 }
 
 .ambient-layer {
@@ -315,7 +316,7 @@ body.ambient-active.layout-shift-up ytmusic-player-page #main-panel {
 #ytm-ext-synced-lyrics {
   display: block !important;
   width: 100% !important;
-  max-height: 65vh !important;
+  max-height: 55vh !important;
   overflow-y: auto !important;
   padding: 16px !important;
   box-sizing: border-box !important;
@@ -323,6 +324,10 @@ body.ambient-active.layout-shift-up ytmusic-player-page #main-panel {
   line-height: 2.2 !important;
   color: #fff !important;
   scroll-behavior: auto !important;
+}
+
+body:not(.fullscreen-active) #ytm-ext-synced-lyrics {
+  margin-top: 5vh !important;
 }
 
 /* Apple Music style - non-current lines: blurred, faded, slightly smaller */
@@ -577,7 +582,7 @@ body.ytm-ext-active.video-mode #song-image {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1;
+  z-index: 3;
   pointer-events: none;
   background: transparent !important;
 }
@@ -600,20 +605,15 @@ body.ytm-ext-active.video-mode #song-image {
   opacity: 0;
 }
 
-/* Slide-up entrance animation (non-/watch → /watch navigation) */
+/* Slide-up entrance animation — matches YouTube Music's open-player-page timing exactly */
 @keyframes ytm-ext-slide-up {
-  from { transform: translateY(100vh); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from { transform: translateY(100vh); }
+  to { transform: translateY(0); }
 }
 
 #ytm-ext-unified-art.slide-in,
-#ytm-ext-sidebar-toggle.slide-in,
-.ambient-container.slide-in {
-  animation: ytm-ext-slide-up 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
-body.ytm-ext-active #av-id.slide-in {
-  animation: ytm-ext-slide-up 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+#ytm-ext-sidebar-toggle.slide-in {
+  animation: ytm-ext-slide-up 0.3s cubic-bezier(0.2, 0, 0.6, 1) forwards;
 }
 
 /* Dark gradient behind top buttons on hover */
@@ -656,8 +656,8 @@ body.fullscreen-active #ytm-ext-art-wrapper::before {
 }
 
 /* Hide extension UI when not on /watch page */
-body:not(.ambient-active) #ytm-ext-unified-art,
-body:not(.ambient-active) #ytm-ext-sidebar-toggle {
+body:not(.ytm-ext-active) #ytm-ext-unified-art,
+body:not(.ytm-ext-active) #ytm-ext-sidebar-toggle {
   display: none !important;
 }
 
@@ -781,6 +781,13 @@ body.ytm-ext-active #av-id {
   justify-content: center !important;
   z-index: 3 !important;
   pointer-events: none !important;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+/* Fade in after player animation settles */
+body.ytm-ext-settled #av-id {
+  opacity: 1 !important;
 }
 
 /* Allow clicks on actual Song/Video toggle buttons */

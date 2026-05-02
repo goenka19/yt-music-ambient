@@ -10,40 +10,6 @@
       <h1>YT Music Enhanced</h1>
     </header>
 
-    <!-- Settings Section -->
-    <div class="settings-section">
-      <div class="setting-row">
-        <span class="setting-label">Ambient Background</span>
-        <label class="toggle">
-          <input type="checkbox" id="ambient-toggle" checked>
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      <div class="setting-row">
-        <span class="setting-label">Animated Effect</span>
-        <label class="toggle">
-          <input type="checkbox" id="animated-toggle">
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      <div class="setting-row">
-        <span class="setting-label">Shift Up</span>
-        <label class="toggle">
-          <input type="checkbox" id="shift-up-toggle">
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      <div class="setting-row">
-        <span class="setting-label">Reduced Size</span>
-        <label class="toggle">
-          <input type="checkbox" id="reduced-size-toggle">
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-    </div>
-
-    <div class="divider"></div>
-
     <!-- Sleep Timer Section -->
     <div class="section-header">
       <span>Sleep Timer</span>
@@ -57,12 +23,14 @@
 
     <div id="buttons-section" class="buttons-section">
       <div class="time-buttons">
-        <button class="time-btn" data-minutes="1">1m</button>
         <button class="time-btn" data-minutes="15">15m</button>
         <button class="time-btn" data-minutes="30">30m</button>
         <button class="time-btn" data-minutes="45">45m</button>
         <button class="time-btn" data-minutes="60">60m</button>
         <button class="time-btn" data-minutes="90">90m</button>
+      </div>
+      <div class="time-buttons">
+        <button class="time-btn" id="end-of-song-btn">End of song</button>
       </div>
     </div>
 
@@ -72,122 +40,6 @@
 
     <div id="error-section" class="error-section hidden">
       <p class="error-text">Open YouTube Music to start a timer</p>
-    </div>
-
-    <div class="divider"></div>
-
-    <!-- Equalizer Section -->
-    <div class="section-header">
-      <span>Equalizer</span>
-      <div class="eq-header-controls">
-        <button id="eq-flat-btn" class="eq-flat-btn">FLAT</button>
-        <label class="toggle eq-toggle">
-          <input type="checkbox" id="eq-toggle">
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-    </div>
-
-    <div id="eq-panel" class="eq-panel hidden">
-      <div class="eq-preset-row">
-        <select id="eq-preset" class="eq-preset-select">
-          <optgroup label="Built-in" id="eq-builtin-group">
-            <option value="Flat">Flat</option>
-            <option value="Bass Boost">Bass Boost</option>
-            <option value="Treble Boost">Treble Boost</option>
-            <option value="Vocal">Vocal</option>
-            <option value="Electronic">Electronic</option>
-            <option value="Rock">Rock</option>
-            <option value="Jazz">Jazz</option>
-            <option value="Custom">Custom</option>
-          </optgroup>
-          <optgroup label="Custom" id="eq-custom-group">
-          </optgroup>
-        </select>
-      </div>
-      <div class="eq-sliders">
-        <div class="eq-slider-group">
-          <span class="eq-slider-value" id="eq-value-0">0</span>
-          <div class="eq-slider-container">
-            <input type="range" id="eq-band-0" class="eq-slider" min="-12" max="12" value="0" orient="vertical">
-          </div>
-          <span class="eq-label">60</span>
-        </div>
-        <div class="eq-slider-group">
-          <span class="eq-slider-value" id="eq-value-1">0</span>
-          <div class="eq-slider-container">
-            <input type="range" id="eq-band-1" class="eq-slider" min="-12" max="12" value="0" orient="vertical">
-          </div>
-          <span class="eq-label">250</span>
-        </div>
-        <div class="eq-slider-group">
-          <span class="eq-slider-value" id="eq-value-2">0</span>
-          <div class="eq-slider-container">
-            <input type="range" id="eq-band-2" class="eq-slider" min="-12" max="12" value="0" orient="vertical">
-          </div>
-          <span class="eq-label">1k</span>
-        </div>
-        <div class="eq-slider-group">
-          <span class="eq-slider-value" id="eq-value-3">0</span>
-          <div class="eq-slider-container">
-            <input type="range" id="eq-band-3" class="eq-slider" min="-12" max="12" value="0" orient="vertical">
-          </div>
-          <span class="eq-label">4k</span>
-        </div>
-        <div class="eq-slider-group">
-          <span class="eq-slider-value" id="eq-value-4">0</span>
-          <div class="eq-slider-container">
-            <input type="range" id="eq-band-4" class="eq-slider" min="-12" max="12" value="0" orient="vertical">
-          </div>
-          <span class="eq-label">16k</span>
-        </div>
-      </div>
-      <div class="eq-actions">
-        <button id="eq-save-btn" class="eq-action-btn">Save</button>
-        <button id="eq-reset-btn" class="eq-action-btn" title="Reset song">Reset</button>
-        <button id="eq-rename-btn" class="eq-action-btn" title="Rename">Rename</button>
-        <button id="eq-delete-btn" class="eq-action-btn" title="Delete">Delete</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Save Preset Modal -->
-  <div id="eq-save-modal" class="eq-modal hidden">
-    <div class="eq-modal-content">
-      <h3>Save Preset</h3>
-      <input type="text" id="eq-preset-name" placeholder="Preset name" maxlength="30">
-      <div class="eq-modal-options">
-        <label><input type="radio" name="eq-apply-to" value="global" checked> Apply to all songs</label>
-      </div>
-      <div class="eq-modal-actions">
-        <button id="eq-save-cancel" class="eq-modal-btn">Cancel</button>
-        <button id="eq-save-confirm" class="eq-modal-btn eq-modal-btn-primary">Save</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Rename Modal -->
-  <div id="eq-rename-modal" class="eq-modal hidden">
-    <div class="eq-modal-content">
-      <h3>Rename Preset</h3>
-      <p id="eq-rename-current"></p>
-      <input type="text" id="eq-rename-input" placeholder="New name" maxlength="30">
-      <div class="eq-modal-actions">
-        <button id="eq-rename-cancel" class="eq-modal-btn">Cancel</button>
-        <button id="eq-rename-confirm" class="eq-modal-btn eq-modal-btn-primary">Rename</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Delete Modal -->
-  <div id="eq-delete-modal" class="eq-modal hidden">
-    <div class="eq-modal-content">
-      <h3>Delete Preset?</h3>
-      <p id="eq-delete-name"></p>
-      <div class="eq-modal-actions">
-        <button id="eq-delete-cancel" class="eq-modal-btn">Cancel</button>
-        <button id="eq-delete-confirm" class="eq-modal-btn eq-modal-btn-danger">Delete</button>
-      </div>
     </div>
   </div>
 
