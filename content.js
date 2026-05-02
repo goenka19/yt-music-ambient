@@ -11,6 +11,7 @@
   let observer = null;
   let mainUpdateInterval = null;
   let miniPlayerAutoCloseInterval = null;
+  let lyricsTransitionInterval = null;
   let settings = {
     ambientEnabled: true,
     animatedEnabled: false,
@@ -219,7 +220,8 @@
     }
 
     // Listen for history API changes from player-bridge.js (page context)
-    document.addEventListener('ytm-ext-url-change', onUrlChange);
+    urlChangeHandler = onUrlChange;
+    document.addEventListener('ytm-ext-url-change', urlChangeHandler);
 
     // Keep MutationObserver as fallback
     urlObserver = new MutationObserver(onUrlChange);
@@ -447,8 +449,8 @@
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
         <div class="ytm-ext-pip-overlay">
-          <div class="ytm-ext-pip-title" id="ytm-ext-pip-title">${title}</div>
-          <div class="ytm-ext-pip-artist" id="ytm-ext-pip-artist">${artist}</div>
+          <div class="ytm-ext-pip-title" id="ytm-ext-pip-title">${escapeHtml(title)}</div>
+          <div class="ytm-ext-pip-artist" id="ytm-ext-pip-artist">${escapeHtml(artist)}</div>
           <div class="ytm-ext-pip-controls">
             <button id="ytm-ext-pip-prev">
               <svg width="24" height="24" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
@@ -632,7 +634,6 @@
 
     const video = findVideoElement();
     if (!video) {
-      console.log('[YTM-Ext:EQ] No video element found');
       return false;
     }
 
@@ -672,7 +673,6 @@
       bypassGain.connect(audioCtx.destination);
 
       eqInitialized = true;
-      console.log('[YTM-Ext:EQ] Audio engine initialized');
 
       syncAudioPath();
       loadEqSettings();
@@ -719,7 +719,6 @@
 
   async function loadEqSettings() {
     const videoId = getCurrentVideoId();
-    console.log('[YTM-Ext:EQ] Loading EQ for video:', videoId);
 
     chrome.storage.local.get(['eqEnabled', 'eq_global'], (data) => {
       eqEnabled = data.eqEnabled !== false;
@@ -728,11 +727,9 @@
         const songKey = `eq_track_${videoId}`;
         chrome.storage.local.get([songKey, 'eq_global'], (result) => {
           if (result[songKey]) {
-            console.log('[YTM-Ext:EQ] Found saved EQ for song');
             applyEqBands(result[songKey].bands);
             currentPresetName = result[songKey].preset || 'Custom';
           } else if (result.eq_global) {
-            console.log('[YTM-Ext:EQ] Applying global EQ');
             applyEqBands(result.eq_global.bands);
             currentPresetName = result.eq_global.preset || 'Custom';
           }
@@ -746,7 +743,6 @@
 
   async function onSongChange(videoId) {
     if (!videoId || videoId === currentVideoId) return;
-    console.log('[YTM-Ext:EQ] Song changed to:', videoId);
     currentVideoId = videoId;
 
     const songKey = `eq_track_${videoId}`;
@@ -755,11 +751,9 @@
     });
 
     if (result[songKey]) {
-      console.log('[YTM-Ext:EQ] Found saved EQ for new song');
       applyEqBands(result[songKey].bands);
       currentPresetName = result[songKey].preset || 'Custom';
     } else if (result.eq_global) {
-      console.log('[YTM-Ext:EQ] Applying global EQ');
       applyEqBands(result.eq_global.bands);
       currentPresetName = result.eq_global.preset || 'Custom';
     }
@@ -774,7 +768,6 @@
       const obj = {};
       obj[songKey] = settings;
       chrome.storage.local.set(obj, () => {
-        console.log('[YTM-Ext:EQ] Saved EQ for song:', videoId);
       });
     }, 1000);
   }
@@ -782,7 +775,6 @@
   function resetSongEQ(videoId) {
     const songKey = `eq_track_${videoId}`;
     chrome.storage.local.remove([songKey], () => {
-      console.log('[YTM-Ext:EQ] Reset EQ for song:', videoId);
     });
     applyGlobalEq();
     currentPresetName = 'Custom';
@@ -805,7 +797,6 @@
     clearTimeout(globalSaveTimeout);
     globalSaveTimeout = setTimeout(() => {
       chrome.storage.local.set({ eq_global: settings }, () => {
-        console.log('[YTM-Ext:EQ] Saved global EQ');
       });
     }, 500);
   }
@@ -1038,7 +1029,6 @@
         return true;
       }
     });
-    console.log('[YTM-Ext:EQ] Message handler registered');
   }
 
   let videoObserver = null;
@@ -1047,13 +1037,11 @@
 
     videoObserver = new MutationObserver(() => {
       if (eqInitialized && !findVideoElement()) {
-        console.log('[YTM-Ext:EQ] Video element removed, marking for reinit');
         eqInitialized = false;
       }
     });
 
     videoObserver.observe(document.body, { childList: true, subtree: true });
-    console.log('[YTM-Ext:EQ] Video observer started');
   }
 
   function initSongObserver() {
@@ -1076,7 +1064,6 @@
     }
 
     songObserverInterval = setInterval(checkUrlChange, 1000);
-    console.log('[YTM-Ext:EQ] Song observer started');
 
     document.addEventListener('ytmusic-player-bar', checkSongChange);
 
@@ -1221,19 +1208,11 @@
   }
 
   function preFlightCheck() {
-    console.group('[YTM-Ext:PreFlight] Running pre-flight checks...');
     let allPassed = true;
 
     const url = getAlbumArtUrl();
-    if (url) {
-      console.log('✅ getAlbumArtUrl() returns URL');
-      if (url.includes('w1200') || url.includes('s1200')) {
-        console.log('✅ URL is high-resolution (1200px)');
-      } else {
-        console.warn('⚠️ URL might be low-resolution:', url);
-      }
-    } else {
-      console.log('⚠️ getAlbumArtUrl() returned null (no song playing?)');
+    if (url && !url.includes('w1200') && !url.includes('s1200')) {
+      console.warn('⚠️ URL might be low-resolution:', url);
     }
 
     const testDiv = document.createElement('div');
@@ -1241,7 +1220,6 @@
     document.body.appendChild(testDiv);
     const found = document.getElementById('ytm-ext-test');
     if (found) {
-      console.log('✅ Can create and append elements to body');
       found.remove();
     } else {
       console.error('❌ CRITICAL: Cannot append elements to body!');
@@ -1250,7 +1228,6 @@
 
     document.body.classList.add('ytm-ext-test-class');
     if (document.body.classList.contains('ytm-ext-test-class')) {
-      console.log('✅ CSS class manipulation works');
       document.body.classList.remove('ytm-ext-test-class');
     } else {
       console.error('❌ CRITICAL: CSS class manipulation failed!');
@@ -1261,7 +1238,6 @@
       localStorage.setItem('ytm-ext-test', 'test');
       const value = localStorage.getItem('ytm-ext-test');
       if (value === 'test') {
-        console.log('✅ localStorage works');
         localStorage.removeItem('ytm-ext-test');
       } else {
         console.error('❌ localStorage read/write mismatch');
@@ -1272,50 +1248,10 @@
       allPassed = false;
     }
 
-    console.log('---');
-    if (allPassed) {
-      console.log('✅ All pre-flight checks passed!');
-    } else {
+    if (!allPassed) {
       console.error('❌ Some pre-flight checks FAILED - features may not work!');
     }
-    console.groupEnd();
     return allPassed;
-  }
-
-  function verifyUnifiedArtState() {
-    console.group('[YTM-Ext:Verify] System State Check');
-
-    const container = document.getElementById('ytm-ext-unified-art');
-    console.log('Container exists:', !!container);
-
-    const img = document.getElementById('ytm-ext-unified-art-img');
-    console.log('Image exists:', !!img);
-    console.log('Image has src:', img?.src ? 'yes' : 'no');
-    console.log('Container hidden class:', container?.classList.contains('hidden'));
-
-    console.log('Body classes:', {
-      'ytm-ext-active': document.body.classList.contains('ytm-ext-active'),
-      'sidebar-collapsed': document.body.classList.contains('sidebar-collapsed'),
-      'fullscreen-active': document.body.classList.contains('fullscreen-active'),
-      'video-mode': document.body.classList.contains('video-mode')
-    });
-
-    const sidebarBtn = document.getElementById('ytm-ext-sidebar-toggle');
-    console.log('Sidebar toggle exists:', !!sidebarBtn);
-
-    const songImage = document.querySelector('#song-image');
-    if (songImage) {
-      const computed = window.getComputedStyle(songImage);
-      console.log('Native #song-image opacity:', computed.opacity);
-    }
-
-    if (img) {
-      const rect = img.getBoundingClientRect();
-      console.log('Unified art dimensions:', rect.width + 'x' + rect.height);
-      console.log('Unified art position:', 'x=' + rect.x + ', y=' + rect.y);
-    }
-
-    console.groupEnd();
   }
 
   function getPlayerTime() {
@@ -1386,7 +1322,6 @@
 
   // Helper: Try to click Lyrics tab button to force render lazy-loaded content
   function clickLyricsTabToRender() {
-    console.log('[YTM-Ext:Lyrics] Tier 2: Trying to click Lyrics tab button...');
     const tabButtons = document.querySelectorAll('tp-yt-paper-tab.tab-header.ytmusic-player-page');
     let lyricsTabButton = null;
     
@@ -1399,7 +1334,6 @@
     }
     
     if (!lyricsTabButton) {
-      console.log('[YTM-Ext:Lyrics] Tier 2 FAIL: No Lyrics tab button found');
       return false;
     }
     
@@ -1408,18 +1342,15 @@
       lyricsTabButton.removeAttribute('disabled');
       lyricsTabButton.removeAttribute('aria-disabled');
       lyricsTabButton.style.pointerEvents = '';
-      console.log('[YTM-Ext:Lyrics] Tier 2: Enabled disabled Lyrics tab button');
     }
     
     // Click it
     lyricsTabButton.click();
-    console.log('[YTM-Ext:Lyrics] Tier 2: Clicked Lyrics tab button');
     return true;
   }
 
   // Helper: Create fallback container in main panel
   function createFallbackContainer() {
-    console.log('[YTM-Ext:Lyrics] Tier 3: Creating fallback container...');
     
     // Try various parent selectors
     const selectors = [
@@ -1433,7 +1364,6 @@
     for (const sel of selectors) {
       parent = document.querySelector(sel);
       if (parent) {
-        console.log('[YTM-Ext:Lyrics] Tier 3: Found parent:', sel);
         break;
       }
     }
@@ -1463,7 +1393,6 @@
       border-radius: 12px !important;
     `;
     document.body.appendChild(container);
-    console.log('[YTM-Ext:Lyrics] Tier 3: Created fallback container (centered overlay)');
     return container;
   }
 
@@ -1473,7 +1402,6 @@
 
     // NEW: If container exists but is in wrong tab, remove it
     if (syncedContainer && !isContainerInLyricsTab(syncedContainer)) {
-      console.log('[YTM-Ext:Lyrics] Container found in wrong tab, removing');
       syncedContainer.remove();
       syncedContainer = null; // Force recreation
     }
@@ -1481,7 +1409,6 @@
     // CRITICAL: Only render if on Lyrics tab or if we have an existing container to update
     // This prevents rendering to Related/Up Next tabs during transitions
     if (!syncedContainer && !isOnLyricsTab()) {
-      console.log('[YTM-Ext:Lyrics] Not on Lyrics tab and no container, aborting render');
       return;
     }
 
@@ -1496,45 +1423,40 @@
         const lyricsTabRenderer = shelfRenderer.closest('ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]');
         if (lyricsTabRenderer) {
           targetParent = shelfRenderer;
-          console.log('[YTM-Ext:Lyrics] Tier 1 SUCCESS: Found shelfRenderer in Lyrics tab');
-        } else {
-          console.log('[YTM-Ext:Lyrics] Tier 1 FAIL: shelfRenderer not in Lyrics tab');
         }
       }
     }
     
     // TIER 2: Find Lyrics tab renderer by page-type
     if (!targetParent) {
-      console.log('[YTM-Ext:Lyrics] Tier 1 FAIL, trying Tier 2...');
       const lyricsRenderer = document.querySelector('ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]');
       if (lyricsRenderer) {
         const shelf = lyricsRenderer.querySelector('ytmusic-description-shelf-renderer');
         if (shelf) {
           shelfRenderer = shelf;
           targetParent = shelf;
-          console.log('[YTM-Ext:Lyrics] Tier 2 SUCCESS: Found shelf in Lyrics tab');
         } else {
           targetParent = lyricsRenderer;
-          console.log('[YTM-Ext:Lyrics] Tier 2 SUCCESS: Lyrics tab (no shelf, will replace message)');
         }
-      } else {
-        console.log('[YTM-Ext:Lyrics] Tier 2 FAIL: Lyrics tab not active');
       }
     }
     
-    // TIER 3: No Lyrics tab - click the button and let Observer handle it
+    // TIER 3: Tab renderer not ready — store pending lyrics and wait for MutationObserver
     if (!targetParent && !syncedContainer && !lyricsRenderInProgress) {
-      console.log('[YTM-Ext:Lyrics] Tier 2 failed, trying Tier 3...');
       lyricsRenderInProgress = true;
       pendingLyricsData = lyrics;
-      const clicked = clickLyricsTabToRender();
-      if (clicked) {
-        console.log('[YTM-Ext:Lyrics] Tier 3: Clicked tab, waiting for MutationObserver...');
-        return; // Let MutationObserver detect when tab appears
+      if (!isOnLyricsTab()) {
+        // Not currently on Lyrics tab — click to navigate there
+        const clicked = clickLyricsTabToRender();
+        if (clicked) {
+          return; // Let MutationObserver detect when tab appears
+        } else {
+          lyricsRenderInProgress = false;
+          pendingLyricsData = null;
+        }
       } else {
-        lyricsRenderInProgress = false;
-        pendingLyricsData = null;
-        console.log('[YTM-Ext:Lyrics] Tier 3 FAIL: Could not click Lyrics tab, cleared pending data');
+        // Already on Lyrics tab — renderer not ready yet, wait for MutationObserver
+        return;
       }
     }
     
@@ -1587,6 +1509,10 @@
       .map((line, i) => `<div class="synced-line" data-time="${line.time}" data-index="${i}">${escapeHtml(line.text)}</div>`)
       .join('');
 
+    // Start or restart sync — every render path goes through here so sync always fires
+    const renderSessionId = syncSessionId;
+    requestAnimationFrame(() => startSync(lyrics, renderSessionId));
+
     // Clear pending lyrics since we rendered successfully
     if (pendingLyricsData) {
       pendingLyricsData = null;
@@ -1606,12 +1532,10 @@
         e.preventDefault();
         e.stopPropagation();
         if (!isVideoReady) {
-          console.log('[YTM-Ext] Click ignored - video not ready yet');
           return;
         }
         const lyricTime = parseFloat(e.target.dataset.time);
         seekPlayer(lyricTime);
-        console.log('[YTM-Ext] Seeking to time:', lyricTime);
       }
     };
     syncedContainer.addEventListener('click', lyricsClickHandler);
@@ -1638,7 +1562,6 @@
   let syncInterval = null;
 
   function startSync(lyrics, sessionId) {
-    console.log('[YTM-Ext] Starting lyrics sync, first lyric at:', lyrics[0]?.time, 'session:', sessionId);
 
     // Clear previous interval if exists
     if (syncInterval) {
@@ -1652,7 +1575,6 @@
     function updateSync() {
       // Abort if session has changed (new song started)
       if (syncSessionId !== sessionId) {
-        console.log('[YTM-Ext] Sync session expired, stopping');
         if (syncInterval) {
           clearInterval(syncInterval);
           syncInterval = null;
@@ -1662,11 +1584,6 @@
 
       const time = getPlayerTime();
       handlerCallCount++;
-
-      // Log first few calls
-      if (handlerCallCount <= 3) {
-        console.log('[YTM-Ext] sync tick #' + handlerCallCount + ', time:', time.toFixed(2));
-      }
 
       // Find current line
       let index = -1;
@@ -1713,7 +1630,6 @@
     isVideoReady = true;
     syncInterval = setInterval(updateSync, 200);
     updateSync();
-    console.log('[YTM-Ext] Sync started');
   }
 
   async function enhanceLyrics(element) {
@@ -1725,17 +1641,14 @@
     if (element) {
       element.dataset.synced = 'processing';
     }
-    console.log('[YTM-Ext] enhanceLyrics called, element:', element ? 'provided' : 'null (YTM has no lyrics)');
 
     const title = getSongTitle();
     const artist = getArtistName();
-    console.log('[YTM-Ext] Song:', title, 'Artist:', artist);
 
     if (!title) {
       if (element) {
         element.dataset.synced = 'failed';
       }
-      console.log('[YTM-Ext] No title found, aborting');
       return;
     }
 
@@ -1745,10 +1658,8 @@
     try {
       // Get duration from player bridge (correct per-song value, not MSE cumulative)
       let duration = getPlayerDuration();
-      console.log('[YTM-Ext] Player duration:', duration);
 
       // Request synced lyrics from background
-      console.log('[YTM-Ext] Fetching lyrics from LRCLIB... (duration:', duration, ')');
       const syncedLyrics = await chrome.runtime.sendMessage({
         action: 'FETCH_LYRICS',
         title,
@@ -1758,31 +1669,22 @@
 
       // Abort if song changed while fetching
       if (syncSessionId !== mySessionId) {
-        console.log('[YTM-Ext] Session expired during lyrics fetch, aborting');
         return;
       }
 
-      console.log('[YTM-Ext] Got response:', syncedLyrics ? 'lyrics found' : 'no lyrics');
 
       if (syncedLyrics) {
         const parsed = parseLRC(syncedLyrics);
-        console.log('[YTM-Ext] Parsed', parsed.length, 'lines');
         if (parsed.length > 0) {
-          console.log('[YTM-Ext] First 3 lines:', parsed.slice(0, 3));
           // Store in pendingLyricsData for lazy-load retry
           pendingLyricsData = parsed;
           renderSyncedLyrics(element, parsed);
-          // Use requestAnimationFrame to ensure DOM is ready before syncing
-          requestAnimationFrame(() => {
-            startSync(parsed, mySessionId);
-          });
           if (element) {
             element.dataset.synced = 'true';
           }
           lyricsState = 'synced';
           currentSongHasLyrics = true;
           enhanceNullInFlight = false;
-          console.log('[YTM-Ext] Sync started successfully, lyricsState: synced');
           return;
         }
       }
@@ -1794,24 +1696,20 @@
     if (element) {
       element.dataset.synced = 'failed';
     }
-    console.log('[YTM-Ext] Sync failed, checking for plain lyrics');
 
     // Check if plain lyrics exist (only if element exists)
     const plainLyricsText = element ? (element.textContent?.trim() || '') : '';
     if (plainLyricsText.length > 50) {
       lyricsState = 'plain';
       currentSongHasLyrics = true;
-      console.log('[YTM-Ext] Plain lyrics found, lyricsState: plain');
     } else {
       lyricsState = 'none';
       currentSongHasLyrics = false;
-      console.log('[YTM-Ext] No lyrics found, lyricsState: none');
     }
 
     // If in fullscreen and no synced lyrics found, collapse sidebar
     if (isFullscreen && lyricsState === 'none') {
       document.body.classList.add('sidebar-collapsed');
-      console.log('[YTM-Ext:Fullscreen] No synced lyrics available, collapsing sidebar');
     }
 
     // Re-enable click-to-seek even without synced lyrics
@@ -1824,12 +1722,13 @@
   function checkSongChange() {
     const newTitle = getSongTitle();
     if (newTitle && newTitle !== currentSongTitle) {
-      console.log('[YTM-Ext] Song changed:', currentSongTitle, '->', newTitle);
       currentSongTitle = newTitle;
       lyricsCurrentIndex = -1; // Reset current index for new song
       isVideoReady = false;
       syncSessionId++;
       enhanceNullInFlight = false;
+      pendingLyricsData = null;
+      lyricsRenderInProgress = false;
 
       // Clear old sync interval
       if (syncInterval) {
@@ -1932,6 +1831,7 @@
         if (!lyricsElement && !containerExists) {
           // YTM has no lyrics - render our synced lyrics
           currentSongTitle = getSongTitle();
+          enhanceNullInFlight = true;
           enhanceLyrics(null);
         }
       }
@@ -1966,7 +1866,6 @@
               for (const t of tabs) {
                 if (t.textContent?.trim() === 'Up next') {
                   t.click();
-                  console.log('[YTM-Ext] Switched to Up Next tab (video mode)');
                   break;
                 }
               }
@@ -2015,15 +1914,19 @@
           enhanceLyrics(null);
         }
       } else {
-        // User is NOT on Lyrics tab - clear any pending data to prevent stale injection
-        if (pendingLyricsData) {
+        // Only clear pendingLyricsData when user has explicitly navigated to another tab.
+        // During transient states (tab-switch animation, no tab selected), preserve the data
+        // so MutationObserver Branch 3 can render it once the Lyrics tab renderer loads.
+        const hasOtherTabSelected = !!document.querySelector(
+          'tp-yt-paper-tab.tab-header.ytmusic-player-page[aria-selected="true"]'
+        );
+        if (hasOtherTabSelected && pendingLyricsData) {
           pendingLyricsData = null;
         }
 
         // Remove container if it exists in wrong tab (YTM moves shelf elements between tabs)
         const containerExists = document.getElementById('ytm-ext-synced-lyrics');
         if (containerExists && !isContainerInLyricsTab(containerExists)) {
-          console.log('[YTM-Ext:Lyrics] MutationObserver: Container found in wrong tab, removing');
           containerExists.remove();
         }
       }
@@ -2035,7 +1938,7 @@
     // 1. YTM bug: Lyrics tab stays disabled after video→song toggle
     // 2. Same-song sync recovery: resets lyrics state so MutationObserver re-initializes
     // Runs every 2s, only acts ONCE per transition (flag-guarded).
-    setInterval(() => {
+    lyricsTransitionInterval = setInterval(() => {
       const inVideo = isVideoModeV2();
 
       if (inVideo) {
@@ -2065,7 +1968,6 @@
         lyricsTab.removeAttribute('aria-disabled');
         lyricsTab.style.pointerEvents = '';
         lyricsTab.click();
-        console.log('[YTM-Ext] Re-enabled Lyrics tab (YTM bug workaround)');
       }
 
       // Reset lyrics sync state after video→song transition (only if on Lyrics tab)
@@ -2078,7 +1980,6 @@
         const container = document.getElementById('ytm-ext-synced-lyrics');
         if (container) container.remove();
         wasInVideoForFix = false;
-        console.log('[YTM-Ext] Reset lyrics state after video→song transition');
       }
 
       switchedTabForVideoMode = false;
@@ -2195,7 +2096,6 @@
       if (tabs[1]) {
         enableLyricsTabIfDisabled();
         tabs[1].click();
-        console.log('[YTM-Ext:Fullscreen] Auto-switched to Lyrics tab');
       }
     }
 
@@ -2228,7 +2128,6 @@
     // Auto-collapse based on previous sidebar state
     if (!sidebarWasActive) {
       document.body.classList.add('sidebar-collapsed');
-      console.log('[YTM-Ext:Fullscreen] Sidebar was collapsed, keeping collapsed');
     }
 
     // After CSS is applied, scroll current line into view (no animation)
@@ -2275,7 +2174,6 @@
     const tabs = document.querySelectorAll('tp-yt-paper-tab.tab-header.ytmusic-player-page');
     if (tabs[previousTabIndex] && tabs[previousTabIndex].getAttribute('aria-selected') !== 'true') {
       tabs[previousTabIndex].click();
-      console.log('[YTM-Ext:Fullscreen] Restored tab index:', previousTabIndex);
     }
 
     // Restore YouTube's native player panels
@@ -2339,12 +2237,6 @@
     preloadedFullscreenImg = new Image();
     preloadedFullscreenImg.onerror = () => { preloadedFullscreenImg = null; };
     preloadedFullscreenImg.src = artUrl;
-  }
-
-  function isVideoMode() {
-    const songImg = document.querySelector('ytmusic-player #song-image');
-    if (!songImg) return false;
-    return window.getComputedStyle(songImg).display === 'none';
   }
 
   let fullscreenInitialized = false;
@@ -2444,10 +2336,8 @@
   }
 
   function createUnifiedAlbumArt() {
-    console.log('[YTM-Ext:UnifiedArt] createUnifiedAlbumArt() called');
 
     if (document.getElementById('ytm-ext-unified-art')) {
-      console.log('[YTM-Ext:UnifiedArt] Container already exists, skipping');
       return;
     }
 
@@ -2481,7 +2371,6 @@
     container.appendChild(wrapper);
     document.body.appendChild(container);
 
-    console.log('[YTM-Ext:UnifiedArt] Container created and added to body');
 
     updateUnifiedAlbumArt();
   }
@@ -2602,10 +2491,8 @@
   // ============================================
 
   function createSidebarToggle() {
-    console.log('[YTM-Ext:Sidebar] createSidebarToggle() called');
 
     if (document.getElementById('ytm-ext-sidebar-toggle')) {
-      console.log('[YTM-Ext:Sidebar] Toggle already exists, skipping');
       return;
     }
 
@@ -2614,14 +2501,11 @@
     btn.setAttribute('aria-label', 'Toggle sidebar');
     document.body.appendChild(btn);
 
-    console.log('[YTM-Ext:Sidebar] Toggle button created');
 
     const collapsed = localStorage.getItem('ytm-ext-sidebar-collapsed') === 'true';
-    console.log('[YTM-Ext:Sidebar] Saved state:', collapsed ? 'collapsed' : 'expanded');
 
     if (collapsed) {
       document.body.classList.add('sidebar-collapsed');
-      console.log('[YTM-Ext:Sidebar] Applied collapsed state from localStorage');
       // Force YouTube's layout to recalculate after restoring saved state
       requestAnimationFrame(() => {
         window.dispatchEvent(new Event('resize'));
@@ -2629,20 +2513,16 @@
     }
 
     btn.addEventListener('click', toggleSidebar);
-    console.log('[YTM-Ext:Sidebar] Click handler attached');
   }
 
   function toggleSidebar() {
-    console.log('[YTM-Ext:Sidebar] toggleSidebar() called');
 
     const wasCollapsed = document.body.classList.contains('sidebar-collapsed');
     document.body.classList.toggle('sidebar-collapsed');
     const isCollapsed = document.body.classList.contains('sidebar-collapsed');
 
-    console.log('[YTM-Ext:Sidebar] State changed:', wasCollapsed ? 'collapsed' : 'expanded', '->', isCollapsed ? 'collapsed' : 'expanded');
 
     localStorage.setItem('ytm-ext-sidebar-collapsed', isCollapsed);
-    console.log('[YTM-Ext:Sidebar] Saved to localStorage:', isCollapsed);
 
     // Force YouTube's layout to recalculate (fixes video staying left-aligned)
     requestAnimationFrame(() => {
@@ -2677,25 +2557,6 @@
   }
 
   // ============================================
-  // DEBUG INTERFACE
-  // ============================================
-
-  window.ytmExtDebug = {
-    verify: verifyUnifiedArtState,
-    toggleSidebar: toggleSidebar,
-    updateArt: updateUnifiedAlbumArt,
-    getState: () => ({
-      sidebarCollapsed: document.body.classList.contains('sidebar-collapsed'),
-      fullscreenActive: document.body.classList.contains('fullscreen-active'),
-      videoMode: document.body.classList.contains('video-mode'),
-      hasLyrics: currentSongHasLyrics,
-      lyricsState: lyricsState
-    })
-  };
-
-  console.log('[YTM-Ext] Debug functions available: window.ytmExtDebug.verify(), .toggleSidebar(), .updateArt(), .getState()');
-
-  // ============================================
   // CLEANUP & DESTROY
   // ============================================
 
@@ -2707,6 +2568,7 @@
     if (songObserverInterval) { clearInterval(songObserverInterval); songObserverInterval = null; }
     if (syncInterval) { clearInterval(syncInterval); syncInterval = null; }
     if (pipSyncInterval) { clearInterval(pipSyncInterval); pipSyncInterval = null; }
+    if (lyricsTransitionInterval) { clearInterval(lyricsTransitionInterval); lyricsTransitionInterval = null; }
 
     // Disconnect all observers
     if (observer) { observer.disconnect(); observer = null; }
@@ -2749,11 +2611,10 @@
       'fs-controls-visible'
     );
 
-    console.log('[YTM-Ext] Extension destroyed');
+    window.__ytmExtLoaded = false;
   }
 
   function init() {
-    console.log('[YTM-Ext] Initializing extension...');
 
     // Track initial page state for slide-in animation
     wasOnWatchPage = isNowPlayingPage();
@@ -2797,7 +2658,6 @@
     window.addEventListener('resize', resizeHandler);
     window.addEventListener('beforeunload', destroyExtension);
 
-    console.log('[YTM-Ext] Extension initialized successfully');
   }
 
   if (document.readyState === 'loading') {
