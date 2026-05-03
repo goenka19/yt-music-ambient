@@ -8,6 +8,10 @@
   let ambientContainer = null;
   let currentArtUrl = null;
   let preloadedFullscreenImg = null; // Preloaded image for fullscreen album art
+  let ambientCanvas = null;
+  let ambientAnimFrame = null;
+  let ambientImg = null;
+  let ambientLastFrame = 0;
   let observer = null;
   let mainUpdateInterval = null;
   let miniPlayerAutoCloseInterval = null;
@@ -77,6 +81,11 @@
     if (ambientContainer) {
       ambientContainer.classList.toggle('animated', settings.animatedEnabled);
     }
+    if (settings.animatedEnabled) {
+      if (ambientImg) startAmbientAnimation();
+    } else {
+      stopAmbientAnimation();
+    }
     document.body.classList.toggle('layout-shift-up', settings.shiftUpEnabled);
     document.body.classList.toggle('layout-reduced-size', settings.reducedSizeEnabled);
   }
@@ -136,6 +145,10 @@
       ambientContainer.appendChild(layer);
     }
 
+    ambientCanvas = document.createElement('canvas');
+    ambientCanvas.className = 'ambient-canvas';
+    ambientContainer.appendChild(ambientCanvas);
+
     document.body.prepend(ambientContainer);
     applySettings();
   }
@@ -154,7 +167,10 @@
           layer.style.backgroundImage = `url('${artUrl}')`;
         });
       }
+      ambientImg = img;
+      if (settings.animatedEnabled) startAmbientAnimation();
     };
+    img.crossOrigin = 'anonymous';
     img.src = artUrl;
   }
 
@@ -1111,6 +1127,11 @@
   visibilityChangeHandler = async () => {
     if (document.visibilityState === 'visible' && audioCtx?.state === 'suspended') {
       await audioCtx.resume();
+    }
+    if (document.hidden) {
+      stopAmbientAnimation();
+    } else if (settings.animatedEnabled && ambientImg) {
+      startAmbientAnimation();
     }
   };
   document.addEventListener('visibilitychange', visibilityChangeHandler);
@@ -2591,10 +2612,66 @@
   }
 
   // ============================================
+  // AMBIENT CANVAS ANIMATION
+  // ============================================
+
+  function startAmbientAnimation() {
+    if (!ambientCanvas || !ambientImg) return;
+    cancelAnimationFrame(ambientAnimFrame);
+    ambientCanvas.width = Math.floor(window.innerWidth / 2);
+    ambientCanvas.height = Math.floor(window.innerHeight / 2);
+    ambientLastFrame = 0;
+    ambientAnimFrame = requestAnimationFrame(drawAmbientFrame);
+  }
+
+  function stopAmbientAnimation() {
+    cancelAnimationFrame(ambientAnimFrame);
+    ambientAnimFrame = null;
+  }
+
+  function drawAmbientFrame(timestamp) {
+    if (!ambientCanvas || !ambientImg || !settings.animatedEnabled) return;
+    if (timestamp - ambientLastFrame < 66) {
+      ambientAnimFrame = requestAnimationFrame(drawAmbientFrame);
+      return;
+    }
+    ambientLastFrame = timestamp;
+    const w = ambientCanvas.width, h = ambientCanvas.height;
+    const cx = w / 2, cy = h / 2;
+    const t = timestamp / 1000;
+    const min = Math.min(w, h);
+    const ctx = ambientCanvas.getContext('2d');
+    ctx.clearRect(0, 0, w, h);
+
+    const layers = [
+      { scale: 1.25, rotPeriod: 60, orbitR: 0,          orbitPeriod: 0,  alpha: 0.9 },
+      { scale: 0.80, rotPeriod: 45, orbitR: 0,          orbitPeriod: 0,  alpha: 0.8 },
+      { scale: 0.50, rotPeriod: 30, orbitR: min * 0.18, orbitPeriod: 20, alpha: 0.7 },
+      { scale: 0.25, rotPeriod: 20, orbitR: min * 0.25, orbitPeriod: 12, alpha: 0.6 },
+    ];
+
+    for (const layer of layers) {
+      const lw = w * layer.scale, lh = h * layer.scale;
+      const angle = (t / layer.rotPeriod) * Math.PI * 2;
+      const ox = layer.orbitR * Math.cos((t / layer.orbitPeriod) * Math.PI * 2);
+      const oy = layer.orbitR * Math.sin((t / layer.orbitPeriod) * Math.PI * 2);
+      ctx.save();
+      ctx.globalAlpha = layer.alpha;
+      ctx.translate(cx + ox, cy + oy);
+      ctx.rotate(angle);
+      ctx.drawImage(ambientImg, -lw/2, -lh/2, lw, lh);
+      ctx.restore();
+    }
+    ambientAnimFrame = requestAnimationFrame(drawAmbientFrame);
+  }
+
+  // ============================================
   // CLEANUP & DESTROY
   // ============================================
 
   function destroyExtension() {
+    stopAmbientAnimation();
+
     // Clear all intervals
     if (mainUpdateInterval) { clearInterval(mainUpdateInterval); mainUpdateInterval = null; }
     if (miniPlayerAutoCloseInterval) { clearInterval(miniPlayerAutoCloseInterval); miniPlayerAutoCloseInterval = null; }
@@ -2688,6 +2765,7 @@
 
     resizeHandler = () => {
       requestAnimationFrame(positionToggleBetweenHeaderAndVideo);
+      if (settings.animatedEnabled && ambientImg) startAmbientAnimation();
     };
     window.addEventListener('resize', resizeHandler);
     window.addEventListener('beforeunload', destroyExtension);

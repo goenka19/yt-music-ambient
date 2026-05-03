@@ -1,4 +1,14 @@
 document.addEventListener('DOMContentLoaded', () => {
+  const animatedBgToggle = document.getElementById('animated-bg-toggle');
+
+  chrome.storage.local.get(['animatedEnabled'], (data) => {
+    animatedBgToggle.checked = data.animatedEnabled === true;
+  });
+
+  animatedBgToggle.addEventListener('change', () => {
+    chrome.storage.local.set({ animatedEnabled: animatedBgToggle.checked });
+  });
+
   // Sleep timer elements
   const statusBadge = document.getElementById('status-badge');
   const countdownSection = document.getElementById('countdown-section');
