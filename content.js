@@ -12,6 +12,11 @@
   let ambientAnimFrame = null;
   let ambientImg = null;
   let ambientLastFrame = 0;
+  let ambientPhases = null;
+  let ambientPalette = null;
+  let ambientImageLuminance = 0.5;
+  let endOfSongActive = false;
+  let endOfSongVideoId = null;
   let observer = null;
   let mainUpdateInterval = null;
   let miniPlayerAutoCloseInterval = null;
@@ -157,6 +162,7 @@
     if (!artUrl || artUrl === currentArtUrl) return;
 
     currentArtUrl = artUrl;
+    ambientPhases = null;
     createAmbientBackground();
 
     const img = new Image();
@@ -167,11 +173,106 @@
           layer.style.backgroundImage = `url('${artUrl}')`;
         });
       }
+      extractPalette(img);
       ambientImg = img;
       if (settings.animatedEnabled) startAmbientAnimation();
     };
     img.crossOrigin = 'anonymous';
     img.src = artUrl;
+  }
+
+  function extractPalette(img) {
+    const size = 40;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, size, size);
+    const data = ctx.getImageData(0, 0, size, size).data;
+    const pixels = [];
+    let totalLum = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i], g = data[i+1], b = data[i+2];
+      const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      const chroma = (max - min) / 255;
+      pixels.push({ r, g, b, lum, chroma });
+      totalLum += lum;
+    }
+    ambientImageLuminance = totalLum / (pixels.length);
+
+    // Filter near-gray pixels
+    const vivid = pixels.filter(p => p.chroma > 0.04);
+    const pool = vivid.length >= 5 ? vivid : pixels;
+
+    // K-means-like: pick 5 diverse centroids
+    const centroids = [];
+    const used = new Set();
+    for (let k = 0; k < 5; k++) {
+      let bestIdx = -1, bestDist = -1;
+      for (let i = 0; i < pool.length; i++) {
+        if (used.has(i)) continue;
+        if (centroids.length === 0) { bestIdx = i; break; }
+        let minDist = Infinity;
+        for (const c of centroids) {
+          const dr = pool[i].r - c.r, dg = pool[i].g - c.g, db = pool[i].b - c.b;
+          const dist = dr * dr + dg * dg + db * db;
+          if (dist < minDist) minDist = dist;
+        }
+        if (minDist > bestDist) { bestDist = minDist; bestIdx = i; }
+      }
+      if (bestIdx >= 0) {
+        used.add(bestIdx);
+        centroids.push(pool[bestIdx]);
+      }
+    }
+
+    // Handle insufficient distinct colors
+    while (centroids.length < 5) {
+      const base = centroids[centroids.length - 1] || { r: 40, g: 40, b: 40 };
+      const hueShift = (centroids.length * 30) % 360;
+      const r = Math.min(255, Math.max(20, base.r + (centroids.length % 2 ? 25 : -25)));
+      centroids.push({ r, g: base.g, b: base.b, lum: base.lum, chroma: base.chroma });
+    }
+
+    // Boost darkest entry if album is very dark
+    if (ambientImageLuminance < 0.10) {
+      centroids.sort((a, b) => a.lum - b.lum);
+      const d = centroids[0];
+      centroids[0] = { ...d, r: Math.min(255, d.r + 35), g: Math.min(255, d.g + 35), b: Math.min(255, d.b + 35), lum: Math.min(1, d.lum + 0.14) };
+    }
+
+    // If album is desaturated, add subtle warm/cool tint
+    const avgChroma = centroids.reduce((s, c) => s + (c.chroma || 0), 0) / centroids.length;
+    if (avgChroma < 0.08) {
+      centroids[1] = { ...centroids[1], r: Math.min(255, centroids[1].r + 15), b: Math.max(0, centroids[1].b - 10) };
+      centroids[3] = { ...centroids[3], b: Math.min(255, centroids[3].b + 15), r: Math.max(0, centroids[3].r - 10) };
+    }
+
+    ambientPalette = centroids;
+    applyAmbientFilters();
+  }
+
+  function applyAmbientFilters() {
+    const lum = ambientImageLuminance != null ? ambientImageLuminance : 0.5;
+
+    let brightness, saturate;
+    if (lum < 0.15)      { brightness = 0.75; saturate = 1.3; }
+    else if (lum < 0.25) { brightness = 0.68; saturate = 1.4; }
+    else if (lum < 0.35) { brightness = 0.60; saturate = 1.5; }
+    else if (lum < 0.50) { brightness = 0.50; saturate = 1.6; }
+    else if (lum < 0.70) { brightness = 0.40; saturate = 1.7; }
+    else                 { brightness = 0.30; saturate = 1.7; }
+
+    if (ambientCanvas) {
+      ambientCanvas.style.filter = `blur(50px) saturate(${saturate}) brightness(${brightness})`;
+    }
+    if (ambientContainer) {
+      const layers = ambientContainer.querySelectorAll('.ambient-layer');
+      layers.forEach(l => {
+        l.style.filter = `blur(50px) saturate(${saturate}) brightness(${brightness})`;
+      });
+    }
   }
 
   function checkAndUpdate() {
@@ -232,18 +333,36 @@
             }
           });
 
-          // Reset ambient opacity so it can fade in after player settles
-          if (ambientContainer) ambientContainer.style.opacity = '0';
-
-          // After the player animation (~300ms), settle: apply ambient-active and
-          // fade in #av-id + ambient. ambient-active makes YouTube backgrounds transparent —
-          // applying it earlier causes the home screen to flash while the player slides in.
-          setTimeout(() => {
-            if (!isNowPlayingPage()) return;
+          // Settle exactly when YouTube's slide animation ends.
+          // ambient-active makes YouTube backgrounds transparent — must not fire before
+          // the animation or the home screen background flashes.
+          let settled = false;
+          const settle = () => {
+            if (settled || !isNowPlayingPage()) return;
+            settled = true;
             document.body.classList.add('ytm-ext-settled');
             updatePageState();
-            if (ambientContainer) ambientContainer.style.opacity = '1';
-          }, 350);
+          };
+          const playerPage = document.querySelector('ytmusic-player-page');
+          if (playerPage) {
+            playerPage.addEventListener('transitionend', function onTransEnd(e) {
+              if (e.propertyName === 'transform') {
+                playerPage.removeEventListener('transitionend', onTransEnd);
+                settle();
+              }
+            });
+          }
+          setTimeout(settle, 400); // fallback if transitionend never fires
+        }
+
+        if (wasWatch && !isNowPlayingPage()) {
+          // Hide #av-id before ytm-ext-active is removed so the
+          // position:fixed → in-flow snap is never visible.
+          const avId = document.querySelector('#av-id');
+          if (avId) {
+            avId.style.opacity = '0';
+            setTimeout(() => { avId.style.opacity = ''; }, 400);
+          }
         }
 
         updatePageState();
@@ -1078,6 +1197,18 @@
         }
         return true;
       }
+      if (message.action === 'SET_END_OF_SONG') {
+        endOfSongActive = true;
+        endOfSongVideoId = getCurrentVideoId();
+        sendResponse({ success: true });
+        return true;
+      }
+      if (message.action === 'CANCEL_END_OF_SONG') {
+        endOfSongActive = false;
+        endOfSongVideoId = null;
+        sendResponse({ success: true });
+        return true;
+      }
     });
   }
 
@@ -1103,6 +1234,14 @@
       const videoId = getCurrentVideoId();
       if (videoId && videoId !== currentVideoId) {
         onSongChange(videoId);
+      }
+      if (endOfSongActive && endOfSongVideoId && videoId && videoId !== endOfSongVideoId) {
+        endOfSongActive = false;
+        endOfSongVideoId = null;
+        const btn = document.querySelector('ytmusic-player-bar #play-pause-button button');
+        if (btn && btn.getAttribute('aria-label')?.toLowerCase().includes('pause')) {
+          btn.click();
+        }
       }
     }
 
@@ -1234,7 +1373,25 @@
     const lyricsRenderer = document.querySelector('ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]');
     if (!lyricsRenderer) return null;
 
-    return lyricsRenderer.querySelector('ytmusic-description-shelf-renderer yt-formatted-string.description');
+    const lightResult = lyricsRenderer.querySelector('ytmusic-description-shelf-renderer yt-formatted-string.description');
+    if (lightResult) return lightResult;
+
+    // Light DOM query failed — check if shadow DOM is hiding the element
+    const shelfRenderer = lyricsRenderer.querySelector('ytmusic-description-shelf-renderer');
+    if (shelfRenderer && shelfRenderer.shadowRoot) {
+      const shadowResult = shelfRenderer.shadowRoot.querySelector('yt-formatted-string.description');
+      if (shadowResult) {
+        console.log('[YTM-Ext:Diag] getLyricsTabElement: found lyrics in shelf shadow DOM (not returned, needs .getRootNode().host for closest)');
+      }
+    }
+    if (lyricsRenderer.shadowRoot) {
+      const shadowResult = lyricsRenderer.shadowRoot.querySelector('ytmusic-description-shelf-renderer yt-formatted-string.description');
+      if (shadowResult) {
+        console.log('[YTM-Ext:Diag] getLyricsTabElement: found lyrics in tab shadow DOM (not returned, needs .getRootNode().host for closest)');
+      }
+    }
+
+    return null;
   }
 
   // Validate that lyrics container is child of Lyrics tab renderer
@@ -1689,7 +1846,7 @@
 
   async function enhanceLyrics(element) {
     // Don't inject lyrics in video mode or non-player pages
-    if (isVideoModeV2()) return;
+    if (isVideoModeV2()) { enhanceNullInFlight = false; return; }
     if (!isOnPlayerPage()) return;
 
     // If no element (YTM has no lyrics), we'll still fetch and render synced lyrics
@@ -1704,6 +1861,7 @@
       if (element) {
         element.dataset.synced = 'failed';
       }
+      enhanceNullInFlight = false;
       return;
     }
 
@@ -1724,6 +1882,7 @@
 
       // Abort if song changed while fetching
       if (syncSessionId !== mySessionId) {
+        enhanceNullInFlight = false;
         return;
       }
 
@@ -1763,7 +1922,7 @@
     }
 
     // If in fullscreen and no synced lyrics found, collapse sidebar
-    if (isFullscreen && lyricsState === 'none') {
+    if (isFullscreen && lyricsState !== 'synced') {
       document.body.classList.add('sidebar-collapsed');
     }
 
@@ -2621,6 +2780,7 @@
     ambientCanvas.width = Math.floor(window.innerWidth / 2);
     ambientCanvas.height = Math.floor(window.innerHeight / 2);
     ambientLastFrame = 0;
+    applyAmbientFilters();
     ambientAnimFrame = requestAnimationFrame(drawAmbientFrame);
   }
 
@@ -2641,27 +2801,50 @@
     const t = timestamp / 1000;
     const min = Math.min(w, h);
     const ctx = ambientCanvas.getContext('2d');
-    ctx.clearRect(0, 0, w, h);
+
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(0, 0, w, h);
+
+    if (!ambientPhases) {
+      ambientPhases = [0, 1, 2, 3].map(() => Math.random() * Math.PI * 2);
+    }
+
+    const lum = ambientImageLuminance || 0.5;
+    const isDark = lum < 0.20;
+    const isLight = lum > 0.65;
+
+    let overlayAlpha;
+    if (isDark) overlayAlpha = 0.08;
+    else if (isLight) overlayAlpha = 0.42;
+    else overlayAlpha = 0.10 + (lum - 0.20) * 0.55;
+
+    const alphas = isDark ? [0.95, 0.80, 0.68, 0.55]
+                 : isLight ? [0.48, 0.33, 0.23, 0.15]
+                 : [0.88, 0.70, 0.55, 0.40];
 
     const layers = [
-      { scale: 1.25, rotPeriod: 60, orbitR: 0,          orbitPeriod: 0,  alpha: 0.9 },
-      { scale: 0.80, rotPeriod: 45, orbitR: 0,          orbitPeriod: 0,  alpha: 0.8 },
-      { scale: 0.50, rotPeriod: 30, orbitR: min * 0.18, orbitPeriod: 20, alpha: 0.7 },
-      { scale: 0.25, rotPeriod: 20, orbitR: min * 0.25, orbitPeriod: 12, alpha: 0.6 },
+      { scale: 1.50, rotPeriod: 70, orbitR: min * 0.10, orbitPeriod: 110, phase: ambientPhases[0], alpha: alphas[0] },
+      { scale: 1.15, rotPeriod: 55, orbitR: min * 0.18, orbitPeriod: 90,  phase: ambientPhases[1], alpha: alphas[1] },
+      { scale: 0.80, rotPeriod: 40, orbitR: min * 0.24, orbitPeriod: 70,  phase: ambientPhases[2], alpha: alphas[2] },
+      { scale: 0.45, rotPeriod: 28, orbitR: min * 0.28, orbitPeriod: 50,  phase: ambientPhases[3], alpha: alphas[3] },
     ];
 
     for (const layer of layers) {
       const lw = w * layer.scale, lh = h * layer.scale;
-      const angle = (t / layer.rotPeriod) * Math.PI * 2;
-      const ox = layer.orbitR * Math.cos((t / layer.orbitPeriod) * Math.PI * 2);
-      const oy = layer.orbitR * Math.sin((t / layer.orbitPeriod) * Math.PI * 2);
+      const angle = (t / layer.rotPeriod) * Math.PI * 2 + layer.phase;
+      const ox = layer.orbitR * Math.cos((t / layer.orbitPeriod) * Math.PI * 2 + layer.phase);
+      const oy = layer.orbitR * Math.sin((t / layer.orbitPeriod) * Math.PI * 2 + layer.phase * 1.3);
       ctx.save();
       ctx.globalAlpha = layer.alpha;
       ctx.translate(cx + ox, cy + oy);
       ctx.rotate(angle);
-      ctx.drawImage(ambientImg, -lw/2, -lh/2, lw, lh);
+      ctx.drawImage(ambientImg, -lw / 2, -lh / 2, lw, lh);
       ctx.restore();
     }
+
+    ctx.fillStyle = `rgba(5,5,5,${overlayAlpha})`;
+    ctx.fillRect(0, 0, w, h);
+
     ambientAnimFrame = requestAnimationFrame(drawAmbientFrame);
   }
 
@@ -2717,7 +2900,7 @@
 
     // Remove body classes
     document.body.classList.remove(
-      'ambient-active', 'ytm-ext-active', 'layout-shift-up', 'layout-reduced-size',
+      'ambient-active', 'ytm-ext-active', 'ytm-ext-settled', 'layout-shift-up', 'layout-reduced-size',
       'sidebar-collapsed', 'fullscreen-active', 'video-mode', 'video-fullscreen',
       'fs-controls-visible'
     );
@@ -2755,6 +2938,15 @@
     initEqMessageHandler();
     initVideoObserver();
     initSongObserver();
+
+    // Direct load/refresh to /watch: apply settled state after player animation
+    if (isNowPlayingPage()) {
+      setTimeout(() => {
+        if (!isNowPlayingPage()) return;
+        document.body.classList.add('ytm-ext-settled');
+        updatePageState();
+      }, 350);
+    }
 
     // Update unified album art periodically (clear any existing interval first)
     if (mainUpdateInterval) clearInterval(mainUpdateInterval);

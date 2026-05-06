@@ -74,19 +74,21 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const tab = tabs[0];
       if (!tab?.url?.includes('music.youtube.com')) { showError(); return; }
-      chrome.tabs.sendMessage(tab.id, { action: 'GET_SONG_REMAINING' }, (response) => {
-        if (chrome.runtime.lastError || !response?.remainingMs) { showError(); return; }
-        chrome.runtime.sendMessage({
-          action: 'START_TIMER',
-          duration: response.remainingMs,
-          tabId: tab.id
-        }, (resp) => { if (resp?.success) showActiveState(resp.endTime); });
+      chrome.tabs.sendMessage(tab.id, { action: 'SET_END_OF_SONG' }, (response) => {
+        if (chrome.runtime.lastError || !response?.success) { showError(); return; }
+        showEndOfSongState();
       });
     });
   }
 
   function cancelTimer() {
-    chrome.runtime.sendMessage({ action: 'CANCEL_TIMER' }, () => showInactiveState());
+    chrome.runtime.sendMessage({ action: 'CANCEL_TIMER' }, () => {});
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]?.url?.includes('music.youtube.com')) {
+        chrome.tabs.sendMessage(tabs[0].id, { action: 'CANCEL_END_OF_SONG' });
+      }
+    });
+    showInactiveState();
   }
 
   function showActiveState(endTime) {
@@ -115,6 +117,19 @@ document.addEventListener('DOMContentLoaded', () => {
   function showError() {
     buttonsSection.classList.add('hidden');
     errorSection.classList.remove('hidden');
+  }
+
+  function showEndOfSongState() {
+    statusBadge.classList.remove('hidden');
+    statusBadge.textContent = 'End of song';
+    countdownSection.classList.add('hidden');
+    cancelSection.classList.remove('hidden');
+    buttonsSection.classList.add('hidden');
+    errorSection.classList.add('hidden');
+    if (countdownInterval) {
+      clearInterval(countdownInterval);
+      countdownInterval = null;
+    }
   }
 
   function startCountdownDisplay(endTime) {
