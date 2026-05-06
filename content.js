@@ -1892,10 +1892,18 @@
         if (parsed.length > 0) {
           // Store in pendingLyricsData for lazy-load retry
           pendingLyricsData = parsed;
-          renderSyncedLyrics(element, parsed);
-          if (element) {
-            element.dataset.synced = 'true';
+          // Re-check for element — async work may have taken long enough for shelf to render
+          const freshEl = element || getLyricsTabElement();
+          const _ltr = document.querySelector(
+            'ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]'
+          );
+          const shelfPending = _ltr && !_ltr.querySelector('ytmusic-description-shelf-renderer');
+          if (!shelfPending) {
+            renderSyncedLyrics(freshEl, parsed);
+            if (freshEl) freshEl.dataset.synced = 'true';
           }
+          // else: shelf still loading — observer fires when YTM inserts it;
+          // lyricsElement will be non-null, Branch 1 calls enhanceLyrics(lyricsElement)
           lyricsState = 'synced';
           currentSongHasLyrics = true;
           enhanceNullInFlight = false;
@@ -2005,10 +2013,14 @@
             }, 200);
           }
         } else if (!containerExists && !lyricsElement && pendingLyricsData) {
-          // We have pending lyrics but no tab - render them
-          currentSongTitle = getSongTitle();
-          renderSyncedLyrics(null, pendingLyricsData);
-          pendingLyricsData = null;
+          const _ltr = document.querySelector(
+            'ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]'
+          );
+          if (!(_ltr && !_ltr.querySelector('ytmusic-description-shelf-renderer'))) {
+            currentSongTitle = getSongTitle();
+            renderSyncedLyrics(null, pendingLyricsData);
+            pendingLyricsData = null;
+          }
         } else if (containerExists && pendingLyricsData) {
           // Container exists but we have new pending lyrics - update content
           renderSyncedLyrics(null, pendingLyricsData);
@@ -2113,10 +2125,14 @@
           currentSongTitle = getSongTitle();
           enhanceLyrics(lyricsElement);
         } else if (!containerExists && !lyricsElement && pendingLyricsData) {
-          // We have pending lyrics but no tab - try to render them
-          currentSongTitle = getSongTitle();
-          renderSyncedLyrics(null, pendingLyricsData);
-          pendingLyricsData = null;
+          const _ltr = document.querySelector(
+            'ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]'
+          );
+          if (!(_ltr && !_ltr.querySelector('ytmusic-description-shelf-renderer'))) {
+            currentSongTitle = getSongTitle();
+            renderSyncedLyrics(null, pendingLyricsData);
+            pendingLyricsData = null;
+          }
         } else if (containerExists && pendingLyricsData) {
           // Container exists but we have new pending lyrics - update content
           renderSyncedLyrics(null, pendingLyricsData);
@@ -2221,10 +2237,14 @@
           }, 200);
         }
       } else if (!containerExists && !lyricsElement && pendingLyricsData) {
-        // We have pending lyrics - render them
-        currentSongTitle = getSongTitle();
-        renderSyncedLyrics(null, pendingLyricsData);
-        pendingLyricsData = null;
+        const _ltr = document.querySelector(
+          'ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]'
+        );
+        if (!(_ltr && !_ltr.querySelector('ytmusic-description-shelf-renderer'))) {
+          currentSongTitle = getSongTitle();
+          renderSyncedLyrics(null, pendingLyricsData);
+          pendingLyricsData = null;
+        }
       } else if (containerExists && pendingLyricsData) {
         // Container exists but we have new pending lyrics - update content
         renderSyncedLyrics(null, pendingLyricsData);

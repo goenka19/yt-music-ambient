@@ -794,6 +794,7 @@ body.fullscreen-active #ytm-ext-unified-art {
   z-index: 101;
   left: 5%;
   right: 50%;
+  transition: right 0.3s ease;
 }
 
 body.fullscreen-active.sidebar-collapsed #ytm-ext-unified-art {

@@ -33,7 +33,10 @@ async function fetchLyrics(title, artist, duration) {
 
   try {
     const url = `https://lrclib.net/api/search?track_name=${encodeURIComponent(title)}&artist_name=${encodeURIComponent(artist)}`;
-    const response = await fetch(url);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
     const results = await response.json();
     if (!Array.isArray(results)) return null;
 
