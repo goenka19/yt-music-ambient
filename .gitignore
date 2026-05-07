@@ -6,6 +6,8 @@ md/*.jpeg
 !.claude/plans/
 !.claude/plans/*.md
 tasks/
+docs/
+md/
 
 # Keep GitHub repo focused on the extension bundle.
 # Allow README.md for end-user install/use docs, ignore other markdown notes.
