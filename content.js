@@ -37,6 +37,7 @@
   let fullscreenChangeHandler = null;
   let mousemoveHandler = null;
   let resizeHandler = null;
+  let lyricsTabClickHandler = null;
 
   const ALBUM_ART_SELECTORS = [
     'ytmusic-player-bar .image',
@@ -51,6 +52,9 @@
 
   // Load settings from storage
   function loadSettings() {
+    if (typeof chrome === 'undefined' || !chrome?.storage?.local) {
+      return;
+    }
     chrome.storage.local.get(['ambientEnabled', 'animatedEnabled', 'shiftUpEnabled', 'reducedSizeEnabled'], (data) => {
       settings.ambientEnabled = data.ambientEnabled !== false; // default true
       settings.animatedEnabled = data.animatedEnabled === true; // default false
@@ -61,24 +65,26 @@
   }
 
   // Listen for settings changes
-  storageChangeHandler = (changes, namespace) => {
-    if (namespace === 'local') {
-      if (changes.ambientEnabled !== undefined) {
-        settings.ambientEnabled = changes.ambientEnabled.newValue;
+  if (typeof chrome !== 'undefined' && chrome?.storage?.onChanged) {
+    storageChangeHandler = (changes, namespace) => {
+      if (namespace === 'local') {
+        if (changes.ambientEnabled !== undefined) {
+          settings.ambientEnabled = changes.ambientEnabled.newValue;
+        }
+        if (changes.animatedEnabled !== undefined) {
+          settings.animatedEnabled = changes.animatedEnabled.newValue;
+        }
+        if (changes.shiftUpEnabled !== undefined) {
+          settings.shiftUpEnabled = changes.shiftUpEnabled.newValue;
+        }
+        if (changes.reducedSizeEnabled !== undefined) {
+          settings.reducedSizeEnabled = changes.reducedSizeEnabled.newValue;
+        }
+        applySettings();
       }
-      if (changes.animatedEnabled !== undefined) {
-        settings.animatedEnabled = changes.animatedEnabled.newValue;
-      }
-      if (changes.shiftUpEnabled !== undefined) {
-        settings.shiftUpEnabled = changes.shiftUpEnabled.newValue;
-      }
-      if (changes.reducedSizeEnabled !== undefined) {
-        settings.reducedSizeEnabled = changes.reducedSizeEnabled.newValue;
-      }
-      applySettings();
-    }
-  };
-  chrome.storage.onChanged.addListener(storageChangeHandler);
+    };
+    chrome.storage.onChanged.addListener(storageChangeHandler);
+  }
 
   // Apply settings to DOM
   function applySettings() {
@@ -123,17 +129,23 @@
     }
   }
 
-  function getAlbumArtUrl() {
+  function getAlbumArtUrlRaw() {
     for (const selector of ALBUM_ART_SELECTORS) {
       const img = document.querySelector(selector);
       if (img && img.src) {
-        let url = img.src;
-        url = url.replace(/=w\d+-h\d+/, '=w1200-h1200');
-        url = url.replace(/=s\d+/, '=s1200');
-        return url;
+        return img.src;
       }
     }
     return null;
+  }
+
+  function getAlbumArtUrl() {
+    const rawUrl = getAlbumArtUrlRaw();
+    if (!rawUrl) return null;
+    let url = rawUrl;
+    url = url.replace(/=w\d+-h\d+/, '=w1200-h1200');
+    url = url.replace(/=s\d+/, '=s1200');
+    return url;
   }
 
   function createAmbientBackground() {
@@ -337,7 +349,7 @@
           // ambient-active makes YouTube backgrounds transparent — must not fire before
           // the animation or the home screen background flashes.
           let settled = false;
-          const settle = () => {
+          let settle = () => {
             if (settled || !isNowPlayingPage()) return;
             settled = true;
             document.body.classList.add('ytm-ext-settled');
@@ -345,12 +357,19 @@
           };
           const playerPage = document.querySelector('ytmusic-player-page');
           if (playerPage) {
-            playerPage.addEventListener('transitionend', function onTransEnd(e) {
+            const onTransEnd = function(e) {
               if (e.propertyName === 'transform') {
                 playerPage.removeEventListener('transitionend', onTransEnd);
                 settle();
               }
-            });
+            };
+            playerPage.addEventListener('transitionend', onTransEnd);
+            // If transitionend never fires, ensure we don't leak listeners across repeated navigations.
+            const settleOnce = settle;
+            settle = () => {
+              playerPage.removeEventListener('transitionend', onTransEnd);
+              settleOnce();
+            };
           }
           setTimeout(settle, 400); // fallback if transitionend never fires
         }
@@ -388,11 +407,23 @@
   }
 
   function addYouTubeLink() {
-    if (document.getElementById('yt-music-open-yt')) return;
-
     const urlParams = new URLSearchParams(window.location.search);
     const videoId = urlParams.get('v');
-    if (!videoId) return;
+
+    const existing = document.getElementById('yt-music-open-yt');
+    if (!videoId) {
+      if (existing) existing.remove();
+      return;
+    }
+
+    if (existing) {
+      const nextHref = `https://www.youtube.com/watch?v=${videoId}`;
+      if (existing.href !== nextHref) {
+        existing.href = nextHref;
+        existing.dataset.videoId = videoId;
+      }
+      return;
+    }
 
     const rightControls = document.querySelector('ytmusic-player-bar .right-controls-buttons');
     if (!rightControls) return;
@@ -400,6 +431,7 @@
     const btn = document.createElement('a');
     btn.id = 'yt-music-open-yt';
     btn.href = `https://www.youtube.com/watch?v=${videoId}`;
+    btn.dataset.videoId = videoId;
     btn.target = '_blank';
     btn.title = 'Open in YouTube (see comments)';
     btn.style.cssText = 'display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:50%;transition:background 0.2s;';
@@ -1424,7 +1456,10 @@
 
     const url = getAlbumArtUrl();
     if (url && !url.includes('w1200') && !url.includes('s1200')) {
-      console.warn('⚠️ URL might be low-resolution:', url);
+      if (!window.__ytmExtWarnedLowResArtUrl) {
+        window.__ytmExtWarnedLowResArtUrl = true;
+        console.debug('[YTM-Ext] Album art URL might be low-resolution:', url);
+      }
     }
 
     const testDiv = document.createElement('div');
@@ -1647,8 +1682,6 @@
         if (shelf) {
           shelfRenderer = shelf;
           targetParent = shelf;
-        } else {
-          targetParent = lyricsRenderer;
         }
       }
     }
@@ -1894,16 +1927,8 @@
           pendingLyricsData = parsed;
           // Re-check for element — async work may have taken long enough for shelf to render
           const freshEl = element || getLyricsTabElement();
-          const _ltr = document.querySelector(
-            'ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]'
-          );
-          const shelfPending = _ltr && !_ltr.querySelector('ytmusic-description-shelf-renderer');
-          if (!shelfPending) {
-            renderSyncedLyrics(freshEl, parsed);
-            if (freshEl) freshEl.dataset.synced = 'true';
-          }
-          // else: shelf still loading — observer fires when YTM inserts it;
-          // lyricsElement will be non-null, Branch 1 calls enhanceLyrics(lyricsElement)
+          renderSyncedLyrics(freshEl, parsed);
+          if (freshEl) freshEl.dataset.synced = 'true';
           lyricsState = 'synced';
           currentSongHasLyrics = true;
           enhanceNullInFlight = false;
@@ -2013,14 +2038,8 @@
             }, 200);
           }
         } else if (!containerExists && !lyricsElement && pendingLyricsData) {
-          const _ltr = document.querySelector(
-            'ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]'
-          );
-          if (!(_ltr && !_ltr.querySelector('ytmusic-description-shelf-renderer'))) {
-            currentSongTitle = getSongTitle();
-            renderSyncedLyrics(null, pendingLyricsData);
-            pendingLyricsData = null;
-          }
+          currentSongTitle = getSongTitle();
+          renderSyncedLyrics(null, pendingLyricsData);
         } else if (containerExists && pendingLyricsData) {
           // Container exists but we have new pending lyrics - update content
           renderSyncedLyrics(null, pendingLyricsData);
@@ -2041,7 +2060,7 @@
     if (lyricsObserver) return;
 
     // Enable disabled Lyrics tab on user click and render synced lyrics
-    document.addEventListener('click', (e) => {
+    lyricsTabClickHandler = (e) => {
       if (isVideoModeV2()) return;
       const tab = e.target.closest('tp-yt-paper-tab.tab-header.ytmusic-player-page');
       if (!tab) return;
@@ -2061,7 +2080,8 @@
           enhanceLyrics(null);
         }
       }
-    }, { passive: true });
+    };
+    document.addEventListener('click', lyricsTabClickHandler, { passive: true });
 
     // Shared state for video→song transition recovery
     let wasInVideoForFix = false;
@@ -2125,14 +2145,8 @@
           currentSongTitle = getSongTitle();
           enhanceLyrics(lyricsElement);
         } else if (!containerExists && !lyricsElement && pendingLyricsData) {
-          const _ltr = document.querySelector(
-            'ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]'
-          );
-          if (!(_ltr && !_ltr.querySelector('ytmusic-description-shelf-renderer'))) {
-            currentSongTitle = getSongTitle();
-            renderSyncedLyrics(null, pendingLyricsData);
-            pendingLyricsData = null;
-          }
+          currentSongTitle = getSongTitle();
+          renderSyncedLyrics(null, pendingLyricsData);
         } else if (containerExists && pendingLyricsData) {
           // Container exists but we have new pending lyrics - update content
           renderSyncedLyrics(null, pendingLyricsData);
@@ -2237,14 +2251,8 @@
           }, 200);
         }
       } else if (!containerExists && !lyricsElement && pendingLyricsData) {
-        const _ltr = document.querySelector(
-          'ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]'
-        );
-        if (!(_ltr && !_ltr.querySelector('ytmusic-description-shelf-renderer'))) {
-          currentSongTitle = getSongTitle();
-          renderSyncedLyrics(null, pendingLyricsData);
-          pendingLyricsData = null;
-        }
+        currentSongTitle = getSongTitle();
+        renderSyncedLyrics(null, pendingLyricsData);
       } else if (containerExists && pendingLyricsData) {
         // Container exists but we have new pending lyrics - update content
         renderSyncedLyrics(null, pendingLyricsData);
@@ -2689,6 +2697,7 @@
       return;
     }
 
+    const rawUrl = getAlbumArtUrlRaw();
     container.classList.remove('hidden');
 
     // Update song info text
@@ -2707,16 +2716,30 @@
     img.classList.add('fading-out');
 
     setTimeout(() => {
-      img.src = url;
+      const nextUrl = url;
+      const nextRawUrl = rawUrl && rawUrl !== nextUrl ? rawUrl : null;
+      img.dataset.fallbackTried = '';
+
+      const setSrc = (src) => {
+        img.src = src;
+        img.dataset.lastRequestedSrc = src;
+      };
+
       img.onload = () => {
         img.classList.remove('fading-out');
         isCrossfading = false;
       };
       img.onerror = (e) => {
-        console.error('[YTM-Ext:UnifiedArt] Image failed to load!', e);
+        if (!img.dataset.fallbackTried && nextRawUrl) {
+          img.dataset.fallbackTried = '1';
+          setSrc(nextRawUrl);
+          return;
+        }
+        console.error('[YTM-Ext:UnifiedArt] Image failed to load:', img.dataset.lastRequestedSrc || img.src, e);
         img.classList.remove('fading-out');
         isCrossfading = false;
       };
+      setSrc(nextUrl);
     }, 300);
   }
 
@@ -2884,6 +2907,12 @@
     if (pipSyncInterval) { clearInterval(pipSyncInterval); pipSyncInterval = null; }
     if (lyricsTransitionInterval) { clearInterval(lyricsTransitionInterval); lyricsTransitionInterval = null; }
 
+    // Clear timeouts
+    if (saveTimeout) { clearTimeout(saveTimeout); saveTimeout = null; }
+    if (globalSaveTimeout) { clearTimeout(globalSaveTimeout); globalSaveTimeout = null; }
+    if (fsControlsTimeout) { clearTimeout(fsControlsTimeout); fsControlsTimeout = null; }
+    if (window.ambientUpdateTimeout) { clearTimeout(window.ambientUpdateTimeout); window.ambientUpdateTimeout = null; }
+
     // Disconnect all observers
     if (observer) { observer.disconnect(); observer = null; }
     if (urlObserver) { urlObserver.disconnect(); urlObserver = null; }
@@ -2892,13 +2921,14 @@
     if (fsBarObserver) { fsBarObserver.disconnect(); fsBarObserver = null; }
 
     // Remove event listeners
-    if (storageChangeHandler) { chrome.storage.onChanged.removeListener(storageChangeHandler); storageChangeHandler = null; }
+    if (storageChangeHandler && typeof chrome !== 'undefined' && chrome?.storage?.onChanged) { chrome.storage.onChanged.removeListener(storageChangeHandler); storageChangeHandler = null; }
     if (urlChangeHandler) { document.removeEventListener('ytm-ext-url-change', urlChangeHandler); urlChangeHandler = null; }
     if (visibilityChangeHandler) { document.removeEventListener('visibilitychange', visibilityChangeHandler); visibilityChangeHandler = null; }
     if (keydownHandler) { document.removeEventListener('keydown', keydownHandler); keydownHandler = null; }
     if (fullscreenChangeHandler) { document.removeEventListener('fullscreenchange', fullscreenChangeHandler); fullscreenChangeHandler = null; }
     if (mousemoveHandler) { document.removeEventListener('mousemove', mousemoveHandler); mousemoveHandler = null; }
     if (resizeHandler) { window.removeEventListener('resize', resizeHandler); resizeHandler = null; }
+    if (lyricsTabClickHandler) { document.removeEventListener('click', lyricsTabClickHandler); lyricsTabClickHandler = null; }
 
     // Close PiP if open
     closePipWindow();

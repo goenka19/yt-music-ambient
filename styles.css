@@ -375,6 +375,7 @@ body:not(.fullscreen-active) #ytm-ext-synced-lyrics {
   justify-content: center;
   padding: 5%;
   box-sizing: border-box;
+  transition: width 0.3s ease;
 }
 
 .fs-lyrics {
@@ -385,6 +386,7 @@ body:not(.fullscreen-active) #ytm-ext-synced-lyrics {
   justify-content: center;
   padding: 7.5% 5%;
   box-sizing: border-box;
+  transition: width 0.3s ease, opacity 0.3s ease, padding 0.3s ease;
 }
 
 .fs-album img {
