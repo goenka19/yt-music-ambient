@@ -1,3 +1,13 @@
 .DS_Store
 ref/
 md/*.jpeg
+.claude/*
+!.claude/settings.json
+!.claude/plans/
+!.claude/plans/*.md
+tasks/
+
+# Keep GitHub repo focused on the extension bundle.
+# Allow README.md for end-user install/use docs, ignore other markdown notes.
+*.md
+!README.md
